@@ -49,6 +49,12 @@ class Ligand():
         self.num_atoms: int = len(self.obatoms)
         if rdmol is not None:
             # rdmol = Chem.RemoveHs(rdmol)
+            # for a in rdmol.GetAtoms():
+            #     if a.GetNumImplicitHs():
+            #         a.SetNumRadicalElectrons(a.GetNumImplicitHs())
+            #         a.SetNoImplicit(True)
+            #         a.UpdatePropertyCache()
+            # rdmol = Chem.RemoveAllHs(rdmol)
             assert self.num_atoms == rdmol.GetNumAtoms(), f'Atom Number ERROR - openbabel: {self.num_atoms}, rdkit: {rdmol.GetNumAtoms()}'
             for obatom, rdatom in zip(self.obatoms, rdmol.GetAtoms()):
                 assert obatom.GetAtomicNum() == rdatom.GetAtomicNum(), f'Atomic Number ERROR - openbabel: {obatom.GetAtomicNum()}, rdkit: {rdatom.GetAtomicNum()}'

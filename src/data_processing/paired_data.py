@@ -1,12 +1,15 @@
 from rdkit import Chem
 from openbabel import pybel
 from torch_geometric.data import Data, Dataset, InMemoryDataset
+from torch_geometric.utils import to_dense_batch
 import torch
+import numpy as np
 import glob
 import os
 import random
 from tqdm import tqdm
 from ligand import Ligand
+from utils import ATOM_TYPE_MAPPING, PP_TYPE_MAPPING, ATOM_FAMILIES, MAP_ATOM_TYPE_AROMATIC_TO_INDEX
 
 
 class PharmacophoreData(Data):
@@ -85,6 +88,7 @@ class PharmacophoreDataset(InMemoryDataset):
     def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None):
         self.root = root
         self._split = split
+        self._max_N = 86
         super(PharmacophoreDataset, self).__init__(root, transform, pre_transform, pre_filter)
         self.load(self.processed_paths[0])
 
@@ -95,8 +99,10 @@ class PharmacophoreDataset(InMemoryDataset):
         random.shuffle(all_docked)
         if self._split == 'train':
             selected_docked = all_docked[:int(len(all_docked)*0.8)]
+        elif self._split == 'valid':
+            selected_docked = all_docked[int(len(all_docked)*0.8):int(len(all_docked)*0.9)]
         elif self._split == 'test':
-            selected_docked = all_docked[int(len(all_docked)*0.8):]
+            selected_docked = all_docked[int(len(all_docked)*0.9):]
         elif self._split == 'all':
             selected_docked = all_docked
         else:
@@ -114,6 +120,8 @@ class PharmacophoreDataset(InMemoryDataset):
             return ['train.pt']
         elif self._split == 'test':
             return ['test.pt']
+        elif self._split == 'valid':
+            return ['valid.pt']
         elif self._split == 'all':
             return ['data.pt']
         else: 
@@ -128,67 +136,111 @@ class PharmacophoreDataset(InMemoryDataset):
     # def get(self, idx):
     #     return self.data[idx]
 
+    def get_max_N(self):
+        print('Calculating the maximum number of atoms in the dataset...')
+        all_docked = os.listdir(os.path.join(self.root, 'raw'))
+        all_files = []
+        for docked in all_docked:
+            all_files += glob.glob(os.path.join(self.root, 'raw', docked, '*.sdf'))
+        max_N = 0
+        for file in tqdm(all_files):
+            rdmol = Chem.MolFromMolFile(file, sanitize=False)
+            N = rdmol.GetNumAtoms()
+            if N > max_N:
+                max_N = N
+
+        print('The maximum number of atoms in the dataset is:', max_N)
+        return max_N
+
     def process(self):
         data_list = []
         # print(self.raw_file_names)
         # print(self.raw_paths)
+        # max_N = self.get_max_N()
+        max_N = self._max_N
         for raw_path in tqdm(self.raw_paths):
+            filename = raw_path.split('/')[-1].split('.')[0]
+            # print(raw_path)
             rdmol = Chem.MolFromMolFile(raw_path, sanitize=False)
             pbmol = next(pybel.readfile("sdf", raw_path))
-            ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None)
+            # try:
+            #     pbmol.removeh()
+            #     rdmol = Chem.RemoveHs(rdmol)
+            # except Exception as e:
+            #     print(raw_path, 'remove Hs failed')
+            #     print(e)
+            #     continue
             try:
-               x, atomic_numbers, pos = self.extract_atom_features(rdmol)
+                ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None)
+            except Exception as e:
+                print(raw_path, 'Ligand init failed')
+                print(e)
+                continue
+            num_feat_class = max(len(PP_TYPE_MAPPING.keys()), len(MAP_ATOM_TYPE_AROMATIC_TO_INDEX.keys()))
+            try:
+               _, x, atomic_numbers, pos = self.extract_atom_features(rdmol, num_feat_class)
             except KeyError:  # some elements are not considered, skip such ligands
                 continue
             try:
-                pp_atom_indices, pp_positions, pp_types, pp_index = self.extract_pp(ligand)
+                pp_atom_indices, pp_positions, pp_types, pp_index = self.extract_pp(ligand, num_feat_class)
                 assert pp_positions.size(1) == 3
             except Exception as e:
-                print(raw_path, 'failed')
+                print(raw_path, 'extract pp failed')
                 print(e)
                 continue
             # print(raw_path, pos.size())
 
             # should we move CoM to zero during data 
-            CoM = self.compute_CoM(pos, atomic_numbers)
-            pos = self.CoM2zero(pos, CoM)
-            pp_positions = self.CoM2zero(pp_positions, CoM)
+            CoM_tensor = self.compute_CoM(pos, atomic_numbers)
+            # pos = self.CoM2zero(pos, CoM)
+            # pp_positions = self.CoM2zero(pp_positions, CoM)
             target_x, target_pos = self.compute_target(x, pos, pp_atom_indices, pp_positions, pp_types)
-            data = Data(x=x, pos=pos, target_x=target_x, target_pos=target_pos)
+
+            x, node_mask = to_dense_batch(x, max_num_nodes=max_N)
+            pos, _ = to_dense_batch(pos, max_num_nodes=max_N)
+            target_x, _ = to_dense_batch(target_x, max_num_nodes=max_N)
+            target_pos, _ = to_dense_batch(target_pos, max_num_nodes=max_N)
+            
+            data = Data(x=x, pos=pos, target_x=target_x, target_pos=target_pos, CoM=CoM_tensor, node_mask=node_mask, ligand_name=filename)
             data_list.append(data)
         # data, slices = self.collate(data_list)
         # torch.save((data, slices), self.processed_paths[0])
         self.save(data_list, self.processed_paths[0])
 
-    def extract_atom_features(self, mol):
-        one_hot_encoding = {'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4, 'P': 5, 'S': 6, 'Cl': 7}    # 8 classes
-        one_hot_x = [one_hot_encoding[atom.GetSymbol()] for atom in mol.GetAtoms()]
+    def extract_atom_features(self, mol, num_class):
+        '''
+            calculate:
+                h: encoding of atom type 
+                types: atomic number
+                atom_positions: 3D coordinates of atoms
+                aromatic_features: whether the atom is aromatic (for reconstruction usage)
+                types_with_aromatic: encoding of types + aromatic feature
+        '''
+        atom_type_mapping = ATOM_TYPE_MAPPING   # {'C': 0, 'N': 1, 'O': 2, 'F': 3, 'P': 4, 'S': 5, 'Cl': 6} not atomic number
+        # aromatic_features = [1 for atom in mol.GetAtoms() if atom.GetIsAromatic() else 0]
+        aromatic_features = [atom.GetIsAromatic() for atom in mol.GetAtoms()]
+        h = [atom_type_mapping[atom.GetSymbol()] for atom in mol.GetAtoms()]
         types = [atom.GetAtomicNum() for atom in mol.GetAtoms()]
         conformer = mol.GetConformer()
         atom_positions = conformer.GetPositions()
+        types_with_aromatic = [(type, aromatic) for type, aromatic in zip(types, aromatic_features)]
+        types_with_aromatic_mapped = [MAP_ATOM_TYPE_AROMATIC_TO_INDEX[type_with_aromatic] for type_with_aromatic in types_with_aromatic]
 
-        one_hot_x_tensor = torch.tensor(one_hot_x, dtype=torch.long)
-        types_tensor = torch.tensor(types, dtype=torch.float)
-        one_hot_x_tensor = torch.nn.functional.one_hot(one_hot_x_tensor, num_classes=len(one_hot_encoding.keys())).to(torch.float)
-        atom_positions_tensor = torch.tensor(atom_positions, dtype=torch.float)
+        h_tensor = torch.tensor(np.array(h), dtype=torch.long)
+        types_tensor = torch.tensor(np.array(types), dtype=torch.float)
+        one_hot_h_tensor = torch.nn.functional.one_hot(h_tensor, num_classes=len(atom_type_mapping.keys())).to(torch.float)
+        types_with_aromatic_tensor = torch.tensor(np.array(types_with_aromatic_mapped), dtype=torch.long)
+        one_hot_types_with_aromatic_tensor = torch.nn.functional.one_hot(types_with_aromatic_tensor, num_classes=num_class).to(torch.float)
+        atom_positions_tensor = torch.tensor(np.array(atom_positions), dtype=torch.float)
 
-        return one_hot_x_tensor, types_tensor, atom_positions_tensor
+        return one_hot_h_tensor, one_hot_types_with_aromatic_tensor, types_tensor, atom_positions_tensor
 
-    def extract_pp(self, ligand):
-        one_hot_encoding = {
-            'Linker': 0,
-            'Hydrophobic': 1,
-            'Aromatic': 2,
-            'Cation': 3,
-            'Anion': 4,
-            'HBond_donor': 5,
-            'HBond_acceptor': 6,
-            'Halogen': 7
-        }
+    def extract_pp(self, ligand, num_class):
+        pp_type_mapping = PP_TYPE_MAPPING
 
         atom_indice_list = []
         position_list = []
-        one_hot_pp_list = []
+        pp_type_list = []
         pp_index_list = []
         
         for pp_node in ligand.graph.nodes:
@@ -196,17 +248,18 @@ class PharmacophoreDataset(InMemoryDataset):
             positions = pp_node.positions.squeeze()
             index = pp_node.index
             # types = [one_hot_encoding[type] for type in pp_node.types]
-            types = one_hot_encoding[pp_node.types[0]]  # we can't have multiple types for one pharmacophore, so we just take the first one
+            types = pp_type_mapping[pp_node.types[0]]  # we can't have multiple types for one pharmacophore, so we just take the first one
 
             atom_indice_list.append(atom_indices)
             position_list.append(positions)
             pp_index_list.append(index)
-            one_hot_pp_list.append(types)
+            pp_type_list.append(types)
 
         # atom_indices_tensor = torch.tensor(atom_indice_list, dtype=torch.long)
-        positions_tensor = torch.tensor(position_list, dtype=torch.float)
-        one_hot_pp_tensor = torch.nn.functional.one_hot(torch.tensor(one_hot_pp_list, dtype=torch.long), num_classes=len(one_hot_encoding.keys())).to(torch.float)
-        pp_index_tensor = torch.tensor(pp_index_list, dtype=torch.long)
+        positions_tensor = torch.tensor(np.array(position_list), dtype=torch.float)
+        # one_hot_pp_tensor = torch.nn.functional.one_hot(torch.tensor(pp_type_list, dtype=torch.long), num_classes=len(pp_type_mapping.keys())).to(torch.float)
+        one_hot_pp_tensor = torch.nn.functional.one_hot(torch.tensor(np.array(pp_type_list), dtype=torch.long), num_classes=num_class).to(torch.float)
+        pp_index_tensor = torch.tensor(np.array(pp_index_list), dtype=torch.long)
 
         return atom_indice_list, positions_tensor, one_hot_pp_tensor, pp_index_tensor
 
@@ -214,7 +267,7 @@ class PharmacophoreDataset(InMemoryDataset):
         # compute the center of mass of the ligand
         periodic_table = Chem.GetPeriodicTable()
         # print(self.pos)
-        sum_pos = torch.zeros(pos.size(1))
+        sum_pos = torch.zeros(1, pos.size(1))
         sum_mass = 0
         for i, atomic_number in enumerate(atomic_numbers):
             mass = periodic_table.GetAtomicWeight(int(atomic_number))
@@ -229,7 +282,11 @@ class PharmacophoreDataset(InMemoryDataset):
         return pos
     
     def compute_target(self, x, pos, pp_atom_indices, pp_positions, pp_types):
-        # compute the target of the diffusion bridge, which is each atom's feat/pos destination regarding its pharmacophore membership
+        '''
+            Compute the target of the diffusion bridge, which is each atom's feat/pos destination regarding its pharmacophore membership
+            Should we include a bit noise when initializing the target pos?
+        '''
+
         target_x = torch.zeros(x.size(0), x.size(1))
         target_pos = torch.zeros(pos.size(0), pos.size(1))
         atom_in_pp = []
@@ -252,4 +309,5 @@ class PharmacophoreDataset(InMemoryDataset):
 
 if __name__ == '__main__':
     train_dataset = PharmacophoreDataset(root='../../data/cleaned_crossdocked_data', split='train')
+    valid_dataset = PharmacophoreDataset(root='../../data/cleaned_crossdocked_data', split='valid')
     test_dataset = PharmacophoreDataset(root='../../data/cleaned_crossdocked_data', split='test')

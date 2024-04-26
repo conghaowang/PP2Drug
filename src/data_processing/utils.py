@@ -16,6 +16,34 @@ from rdkit.Chem.Draw import rdMolDraw2D
 # IPythonConsole.ipython_useSVG = True
 # IPythonConsole.molSize = 600, 300
 
+ATOM_FAMILIES = ['Acceptor', 'Donor', 'Aromatic', 'Hydrophobe', 'LumpedHydrophobe', 'NegIonizable', 'PosIonizable', 'ZnBinder']
+ATOM_TYPE_MAPPING = {'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4, 'P': 5, 'S': 6, 'Cl': 7}
+PP_TYPE_MAPPING = {
+    'Linker': 0,
+    'Hydrophobic': 1,
+    'Aromatic': 2,
+    'Cation': 3,
+    'Anion': 4,
+    'HBond_donor': 5,
+    'HBond_acceptor': 6,
+    'Halogen': 7
+}
+MAP_ATOM_TYPE_AROMATIC_TO_INDEX = {
+    (1, False): 0,
+    (6, False): 1,
+    (6, True): 2,
+    (7, False): 3,
+    (7, True): 4,
+    (8, False): 5,
+    (8, True): 6,
+    (9, False): 7,
+    (15, False): 8,
+    (15, True): 9,
+    (16, False): 10,
+    (16, True): 11,
+    (17, False): 12
+}
+
 
 def sample_probability(elment_array, plist, N):
     Psample = []
