@@ -161,3 +161,5 @@ cython_debug/
 
 # custom
 data/
+lightning_logs/
+wandb/
