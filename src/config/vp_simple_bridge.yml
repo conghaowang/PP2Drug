@@ -1,6 +1,6 @@
 model:
   denoiser:
-    bridge_type: 'vp'
+    bridge_type: 'vp_simple'
     beta_d: 2
     beta_min: 0.1
     sigma_data: 0.5
@@ -18,7 +18,7 @@ model:
     feature_size: 13
     num_layers: 6
     hidden_size: 128
-    time_cond: True # False
+    time_cond: false # False
     xT_type: 'noise' # 'noise' # 'none' # 'pp'
     xT_mode: 'concat_latent' # 'concat_latent' # 'none'
 
@@ -31,7 +31,7 @@ training:
   learning_rate: 0.001
   lr_anneal_steps: 0
   max_epochs: 100
-  use_lr_scheduler: false
+  use_lr_scheduler: true
   lr_scheduler_config: # 10000 warmup steps
     target: model.utils.lr_scheduler.LambdaLinearScheduler
     params:
