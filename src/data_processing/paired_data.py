@@ -8,8 +8,11 @@ import glob
 import os
 import random
 from tqdm import tqdm
-from ligand import Ligand
-from utils import ATOM_TYPE_MAPPING, PP_TYPE_MAPPING, ATOM_FAMILIES, MAP_ATOM_TYPE_AROMATIC_TO_INDEX
+import sys
+sys.path.append('../')
+from data_processing.ligand import Ligand
+from data_processing.utils import ATOM_TYPE_MAPPING, PP_TYPE_MAPPING, ATOM_FAMILIES, MAP_ATOM_TYPE_AROMATIC_TO_INDEX
+# from script_utils import load_dataset
 
 
 class PharmacophoreData(Data):
@@ -125,7 +128,7 @@ class PharmacophoreDataset(InMemoryDataset):
         elif self._split == 'all':
             return ['data.pt']
         else: 
-            raise ValueError('split must be "train" or "test" or "all"')
+            raise ValueError('split must be "train", "valid", "test" or "all"')
 
     def download(self):
         pass
@@ -178,7 +181,8 @@ class PharmacophoreDataset(InMemoryDataset):
                 continue
             num_feat_class = max(len(PP_TYPE_MAPPING.keys()), len(MAP_ATOM_TYPE_AROMATIC_TO_INDEX.keys()))
             try:
-               _, x, atomic_numbers, pos = self.extract_atom_features(rdmol, num_feat_class)
+                _, x, atomic_numbers, pos, num_nodes = self.extract_atom_features(rdmol, num_feat_class)
+                edge_mask = self.make_edge_mask(num_nodes, self._max_N)
             except KeyError:  # some elements are not considered, skip such ligands
                 continue
             try:
@@ -194,14 +198,15 @@ class PharmacophoreDataset(InMemoryDataset):
             CoM_tensor = self.compute_CoM(pos, atomic_numbers)
             # pos = self.CoM2zero(pos, CoM)
             # pp_positions = self.CoM2zero(pp_positions, CoM)
-            target_x, target_pos = self.compute_target(x, pos, pp_atom_indices, pp_positions, pp_types)
+            target_x, target_pos, node_pp_index = self.compute_target(x, pos, pp_atom_indices, pp_positions, pp_types, pp_index, CoM_tensor)
 
             x, node_mask = to_dense_batch(x, max_num_nodes=max_N)
             pos, _ = to_dense_batch(pos, max_num_nodes=max_N)
             target_x, _ = to_dense_batch(target_x, max_num_nodes=max_N)
             target_pos, _ = to_dense_batch(target_pos, max_num_nodes=max_N)
+            node_pp_index, _ = to_dense_batch(node_pp_index, max_num_nodes=max_N)
             
-            data = Data(x=x, pos=pos, target_x=target_x, target_pos=target_pos, CoM=CoM_tensor, node_mask=node_mask, ligand_name=filename)
+            data = Data(x=x, pos=pos, target_x=target_x, target_pos=target_pos, CoM=CoM_tensor, node_mask=node_mask, edge_mask=edge_mask, num_nodes=num_nodes, node_pp_index=node_pp_index, ligand_name=filename)
             data_list.append(data)
         # data, slices = self.collate(data_list)
         # torch.save((data, slices), self.processed_paths[0])
@@ -216,6 +221,7 @@ class PharmacophoreDataset(InMemoryDataset):
                 aromatic_features: whether the atom is aromatic (for reconstruction usage)
                 types_with_aromatic: encoding of types + aromatic feature
         '''
+        num_nodes = mol.GetNumAtoms()
         atom_type_mapping = ATOM_TYPE_MAPPING   # {'C': 0, 'N': 1, 'O': 2, 'F': 3, 'P': 4, 'S': 5, 'Cl': 6} not atomic number
         # aromatic_features = [1 for atom in mol.GetAtoms() if atom.GetIsAromatic() else 0]
         aromatic_features = [atom.GetIsAromatic() for atom in mol.GetAtoms()]
@@ -226,6 +232,7 @@ class PharmacophoreDataset(InMemoryDataset):
         types_with_aromatic = [(type, aromatic) for type, aromatic in zip(types, aromatic_features)]
         types_with_aromatic_mapped = [MAP_ATOM_TYPE_AROMATIC_TO_INDEX[type_with_aromatic] for type_with_aromatic in types_with_aromatic]
 
+        num_nodes_tensor = torch.tensor(num_nodes, dtype=torch.long)
         h_tensor = torch.tensor(np.array(h), dtype=torch.long)
         types_tensor = torch.tensor(np.array(types), dtype=torch.float)
         one_hot_h_tensor = torch.nn.functional.one_hot(h_tensor, num_classes=len(atom_type_mapping.keys())).to(torch.float)
@@ -233,7 +240,16 @@ class PharmacophoreDataset(InMemoryDataset):
         one_hot_types_with_aromatic_tensor = torch.nn.functional.one_hot(types_with_aromatic_tensor, num_classes=num_class).to(torch.float)
         atom_positions_tensor = torch.tensor(np.array(atom_positions), dtype=torch.float)
 
-        return one_hot_h_tensor, one_hot_types_with_aromatic_tensor, types_tensor, atom_positions_tensor
+        return one_hot_h_tensor, one_hot_types_with_aromatic_tensor, types_tensor, atom_positions_tensor, num_nodes_tensor
+    
+    def make_edge_mask(self, N, max_N=86):
+        adj = torch.ones((N, N), dtype=torch.bool)
+        adj[range(N), range(N)] = False
+        edge_mask = torch.zeros((max_N, max_N), dtype=torch.bool)
+        edge_mask[:N, :N] = adj
+        edge_mask = edge_mask.view(1, max_N * max_N).float()
+        edge_mask = edge_mask.bool()
+        return edge_mask
 
     def extract_pp(self, ligand, num_class):
         pp_type_mapping = PP_TYPE_MAPPING
@@ -281,14 +297,16 @@ class PharmacophoreDataset(InMemoryDataset):
         pos -= CoM
         return pos
     
-    def compute_target(self, x, pos, pp_atom_indices, pp_positions, pp_types):
+    def compute_target(self, x, pos, pp_atom_indices, pp_positions, pp_types, pp_index, CoM_tensor, noise_std=0.01):
         '''
             Compute the target of the diffusion bridge, which is each atom's feat/pos destination regarding its pharmacophore membership
             Should we include a bit noise when initializing the target pos?
+            TODO: We don't move the CoM to zero during data preparation now, should initiate the target pos as CoM rather than zeros!!! But then how do we init the target pos during sampling stage?
         '''
 
         target_x = torch.zeros(x.size(0), x.size(1))
         target_pos = torch.zeros(pos.size(0), pos.size(1))
+        node_pp_index = torch.zeros(x.size(0), dtype=torch.long)
         atom_in_pp = []
         # print(self.pp_atom_indices)
         for atom_indices in pp_atom_indices:
@@ -296,18 +314,140 @@ class PharmacophoreDataset(InMemoryDataset):
         for i in range(x.size(0)):
             if i not in atom_in_pp:  # if the atom is not in any pharmacophore, we set its target type to Linker:0 and target position to 0
                 target_x[i] = torch.nn.functional.one_hot(torch.tensor([0]), num_classes=pp_types.size(1)).to(torch.float)
-                target_pos[i] = torch.zeros(pos.size(1))
+                # target_pos[i] = torch.zeros(pos.size(1))
+                target_pos[i] = CoM_tensor + torch.randn_like(CoM_tensor) * noise_std
+                node_pp_index[i] = -1
             else:  # if the atom is in a pharmacophore, we set its target type to the pharmacophore type and target position to the pharmacophore position
                 for j, atom_indices in enumerate(pp_atom_indices):
                     if i in atom_indices:
                         target_x[i] = pp_types[j]
-                        target_pos[i] = pp_positions[j]
+                        target_pos[i] = pp_positions[j] + torch.randn_like(pp_positions[j]) * noise_std
+                        node_pp_index[i] = j    # = pp_index[j]
                         break
         
-        return target_x, target_pos
+        # if args.augment_noise > 0:
+        #     # Add noise eps ~ N(0, augment_noise) around points.
+        #     eps = sample_center_gravity_zero_gaussian_with_mask(x.size(), x.device, node_mask)
+        #     x = x + eps * args.augment_noise
+
+        return target_x, target_pos, node_pp_index
     
 
+class CombinedGraphDataset(PharmacophoreDataset):
+    def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None):
+        self.root = root
+        self._split = split
+        self._max_N = 86 * 2
+        super(PharmacophoreDataset, self).__init__(root, transform, pre_transform, pre_filter)
+        self.load(self.processed_paths[0])
+
+    @property
+    def processed_file_names(self):
+        if self._split == 'train':
+            return ['train_combined_graph.pt']
+        elif self._split == 'test':
+            return ['test_combined_graph.pt']
+        elif self._split == 'valid':
+            return ['valid_combined_graph.pt']
+        elif self._split == 'all':
+            return ['data_combined_graph.pt']
+        else: 
+            raise ValueError('split must be "train", "valid", "test" or "all"')
+        
+    def process(self):
+        data_list = []
+        # print(self.raw_file_names)
+        # print(self.raw_paths)
+        # max_N = self.get_max_N()
+        max_N = self._max_N
+        for raw_path in tqdm(self.raw_paths):
+            filename = raw_path.split('/')[-1].split('.')[0]
+            # print(raw_path)
+            rdmol = Chem.MolFromMolFile(raw_path, sanitize=False)
+            pbmol = next(pybel.readfile("sdf", raw_path))
+            try:
+                ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None)
+            except Exception as e:
+                print(raw_path, 'Ligand init failed')
+                print(e)
+                continue
+            num_feat_class = max(len(PP_TYPE_MAPPING.keys()), len(MAP_ATOM_TYPE_AROMATIC_TO_INDEX.keys()))
+            try:
+                _, x, atomic_numbers, pos, num_nodes = self.extract_atom_features(rdmol, num_feat_class)
+                # edge_mask = self.make_edge_mask(num_nodes)
+            except KeyError:  # some elements are not considered, skip such ligands
+                continue
+            try:
+                pp_atom_indices, pp_positions, pp_types, pp_index = self.extract_pp(ligand, num_feat_class)
+                assert pp_positions.size(1) == 3
+            except Exception as e:
+                print(raw_path, 'extract pp failed')
+                print(e)
+                continue
+            # print(raw_path, pos.size())
+
+            # should we move CoM to zero during data 
+            CoM_tensor = self.compute_CoM(pos, atomic_numbers)
+            # pos = self.CoM2zero(pos, CoM)
+            # pp_positions = self.CoM2zero(pp_positions, CoM)
+            target_x, target_pos, node_pp_index = self.compute_target(x, pos, pp_atom_indices, pp_positions, pp_types, pp_index, CoM_tensor)
+            x_ctr, pos_ctr, Gt_mask = self.combine_target(x, pos, target_x, target_pos, max_N)
+            target_x_ctr, target_pos_ctr, _ = self.combine_target(target_x, target_pos, target_x, target_pos, max_N)
+            edge_mask_ctr = self.make_edge_mask(num_nodes * 2, max_N)
+
+
+            x_ctr, node_mask_ctr = to_dense_batch(x_ctr, max_num_nodes=max_N)
+            target_x_ctr, _ = to_dense_batch(target_x_ctr, max_num_nodes=max_N)
+            pos_ctr, _ = to_dense_batch(pos_ctr, max_num_nodes=max_N)
+            target_pos_ctr, _ = to_dense_batch(target_pos_ctr, max_num_nodes=max_N)
+            node_pp_index, _ = to_dense_batch(node_pp_index, max_num_nodes=max_N)
+            
+            data = Data(x=x_ctr, pos=pos_ctr, original_x=x, original_pos=pos, target_x=target_x_ctr, target_pos=target_pos_ctr, CoM=CoM_tensor, node_mask=node_mask_ctr, Gt_mask=Gt_mask, edge_mask=edge_mask_ctr, num_nodes=num_nodes, node_pp_index=node_pp_index, ligand_name=filename)
+            data_list.append(data)
+        # data, slices = self.collate(data_list)
+        # torch.save((data, slices), self.processed_paths[0])
+        self.save(data_list, self.processed_paths[0])
+
+    def combine_target(self, x, pos, target_x, target_pos, max_N_combined):
+        '''
+            combine the target of the diffusion bridge with the node features and positions into a single graph
+            the target is the destination of the diffusion bridge
+            Input:
+                x: node features
+                pos: node positions
+                target_x: target node features
+                target_pos: target node positions
+                max_N_combined: the maximum number of nodes in the combined graph (2 * max_N)
+            Output:
+                x: node features
+                pos: node positions
+                Gt_mask: mask for the nodes in Gt (excluding the nodes in GT)
+        '''
+        
+        N = x.size(0)
+        x = torch.cat((x, target_x), dim=0)
+        pos = torch.cat((pos, target_pos), dim=0)
+        Gt_mask = torch.zeros([max_N_combined], dtype=torch.bool)
+        Gt_mask[:N] = True
+        return x, pos, Gt_mask
+
+
+def load_dataset(module, root, split):
+    dataset = module(root=root, split=split)
+    return dataset
+
+
 if __name__ == '__main__':
-    train_dataset = PharmacophoreDataset(root='../../data/cleaned_crossdocked_data', split='train')
-    valid_dataset = PharmacophoreDataset(root='../../data/cleaned_crossdocked_data', split='valid')
-    test_dataset = PharmacophoreDataset(root='../../data/cleaned_crossdocked_data', split='test')
+    # train_dataset = PharmacophoreDataset(root='../../data/cleaned_crossdocked_data', split='train')
+    # valid_dataset = PharmacophoreDataset(root='../../data/cleaned_crossdocked_data', split='valid')
+    # test_dataset = PharmacophoreDataset(root='../../data/cleaned_crossdocked_data', split='test')
+
+    # train_dataset = CombinedGraphDataset(root='../../data/cleaned_crossdocked_data', split='train')
+    # valid_dataset = CombinedGraphDataset(root='../../data/cleaned_crossdocked_data', split='valid')
+    # test_dataset = CombinedGraphDataset(root='../../data/cleaned_crossdocked_data', split='test')
+
+    module = CombinedGraphDataset    # PharmacophoreDataset
+    root = '../../data/cleaned_crossdocked_data'
+    train_dataset = load_dataset(module, root, split='train')
+    valid_dataset = load_dataset(module, root, split='valid')
+    test_dataset = load_dataset(module, root, split='test')

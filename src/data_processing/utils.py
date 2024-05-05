@@ -1,5 +1,6 @@
 from rdkit import Chem
 import numpy as np
+import torch
 import sys
 # sys.path.append('../')
 from openbabel import pybel
@@ -59,6 +60,16 @@ def sample_probability(elment_array, plist, N):
         Psample.append(elment_array[index])
 
     return Psample
+
+
+def make_edge_mask(N, max_N, device='cuda'):
+    adj = torch.ones((N, N), dtype=torch.bool)
+    adj[range(N), range(N)] = False
+    edge_mask = torch.zeros((max_N, max_N), dtype=torch.bool, device=device)
+    edge_mask[:N, :N] = adj
+    edge_mask = edge_mask.view(1, max_N * max_N).float()
+    edge_mask = edge_mask.bool()
+    return edge_mask
 
 
 def group_by(mol, ligand, level='pp'):

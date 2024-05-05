@@ -11,8 +11,8 @@ from rdkit import Chem
 from typing import Set, Dict, List, Sequence, Union, Tuple, Optional, Iterator
 from numpy.typing import NDArray
 
-from ligand_utils import get_pharmacophore_nodes, PharmacophoreNode
-from utils import sample_probability
+from .ligand_utils import get_pharmacophore_nodes, PharmacophoreNode
+from .utils import sample_probability
 
 
 def order(a, b):
