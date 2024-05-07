@@ -163,3 +163,7 @@ cython_debug/
 data/
 lightning_logs/
 wandb/
+generation_results/
+docking_res/
+src/dummy.py
+src/test_env.py
