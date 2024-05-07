@@ -4,7 +4,7 @@ import torch.nn as nn
 from torch_scatter import scatter_sum
 from torch_geometric.nn import radius_graph, knn_graph
 
-from .utils.utils_EGNN import E3Block, E3CoordLayer, compute_distance, compose_graph, GaussianSmearing, MLP, batch_hybrid_edge_connection, NONLINEARITIES
+from model.utils.utils_EGNN import E3Block, E3CoordLayer, compute_distance, compose_graph, GaussianSmearing, MLP, batch_hybrid_edge_connection, NONLINEARITIES
 
 class EGNN(torch.nn.Module):
     def __init__(self, max_feat_num, coord_dim, n_layers, hidden_size, max_node_num, include_charge=False, time_cond=True, xT_mode='concat_graph', data_mode='single'):
@@ -291,7 +291,7 @@ class EGNN_combined_graph(nn.Module):
         # for i in range(bs):
         #     batch_[i * n_node:(i + 1) * n_node] = i
         if self.cutoff_mode == 'knn':
-            # print(x.size(), batch_.size())
+            # print(x.size(), batch.size())
             edge_index = knn_graph(x, k=self.k, batch=batch, flow='source_to_target')
             # print('edge index', edge_index)
         elif self.cutoff_mode == 'hybrid':
@@ -325,13 +325,16 @@ class EGNN_combined_graph(nn.Module):
         # x = x.view(bs * n_node, -1)
         # h = h.view(bs * n_node, -1)
         n_node = mask_ligand.sum() * 2    # not used any more
-        # print(x.size())
+        # print('input x:', x)
+        # print('input h:', h)
 
         if self.time_cond:
             t = t.unsqueeze(1)
             # print(h.size(), t.size())
+            # print(h.device, t.device, mask_ligand.device)
             h = torch.cat([h, t], dim=-1)
-            h = self.embedding(h)
+            # print(h.device, mask_ligand.device)
+            h = self.embedding(h) * mask_ligand[:, None]
         all_x = [x]
         all_h = [h]
         for l_idx, layer in enumerate(self.net):
