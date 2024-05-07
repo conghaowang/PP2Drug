@@ -39,7 +39,7 @@ def main(args):
 
     trainer = Trainer(
         max_epochs=config.training.max_epochs,
-        devices=[3],
+        devices=[int(args.gpu)],
         logger=WandbLogger(project='PP2Drug', name=log_name, log_model='all'),
         callbacks=[lr_monitor, early_stopping, checkpoint_callback],
         log_every_n_steps=1,
@@ -53,6 +53,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, default='config/vp_bridge.yml', help='Path to the configuration file')
+    parser.add_argument('--config', '-c', type=str, default='config/vp_bridge.yml', help='Path to the configuration file')
+    parser.add_argument('--gpu', '-g', type=int, default=3, help='Which GPU to use')
     args = parser.parse_args()
     main(args)
