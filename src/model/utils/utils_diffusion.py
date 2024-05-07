@@ -22,6 +22,10 @@ def append_dims(x, target_dims):
     return x[(...,) + (None,) * dims_to_append]
 
 
+def append_zero(x):
+    return torch.cat([x, x.new_zeros([1])])
+
+
 def mean_flat(tensor):
     """
     Take the mean over all non-batch dimensions.
