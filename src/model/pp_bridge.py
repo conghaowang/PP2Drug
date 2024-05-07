@@ -5,12 +5,12 @@ import torch.nn.functional as F
 from torch.optim.lr_scheduler import LambdaLR
 import wandb
 import copy
-
-from .EGNN_backbone import EGNN, EGNN_combined_graph
-from .utils.time_scheduler import UniformSampler, RealUniformSampler
-from .utils.utils_diffusion import append_dims, vp_logs, vp_logsnr, mean_flat, scatter_mean_flat, center2zero, center2zero_with_mask, center2zero_combined_graph, sample_zero_center_gaussian, sample_zero_center_gaussian_with_mask
 import sys
 sys.path.append('..')
+
+from EGNN_backbone import EGNN, EGNN_combined_graph
+from model.utils.time_scheduler import UniformSampler, RealUniformSampler
+from model.utils.utils_diffusion import append_dims, vp_logs, vp_logsnr, mean_flat, scatter_mean_flat, center2zero, center2zero_with_mask, center2zero_combined_graph, sample_zero_center_gaussian, sample_zero_center_gaussian_with_mask
 from script_utils import instantiate_from_config
 
 class PPBridge(pl.LightningModule):
@@ -166,6 +166,9 @@ class PPBridge(pl.LightningModule):
             # print(targ.device, src.device)
             targ.detach().mul_(self.ema_decay).add_(src, alpha = 1 - self.ema_decay)
 
+    # def load_from_checkpoint(self, checkpoint_path):
+    #     checkpoint = torch.load(checkpoint_path)
+    #     self.backbone.load_state_dict(checkpoint['state_dict'])
 
     def preprocess(self, x0, xT, h0, hT, node_mask, Gt_mask=None, num_node=None, batch_info=None, use_mass=False):
         if self.datamodule.startswith('Combined'):
@@ -369,6 +372,7 @@ class PPBridge(pl.LightningModule):
         c_skip, c_out, c_in = [
             append_dims(x, h_t.ndim) for x in self.get_bridge_scalings(sigmas)
         ]
+        # print('c_skip, c_out, c_in', c_skip, c_out, c_in)
                
         rescaled_t = 1000 * 0.25 * torch.log(sigmas + 1e-44)
         if self.datamodule.startswith('Combined'):
@@ -538,7 +542,8 @@ class PPBridge(pl.LightningModule):
         '''
             Customize the optimization process to update params of both the backbone and the diffusion bridge.
         '''
-        optimizer = torch.optim.RAdam(self.backbone.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        # optimizer = torch.optim.RAdam(self.backbone.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        optimizer = torch.optim.AdamW(self.backbone.parameters(), lr=self.lr, amsgrad=True, weight_decay=self.weight_decay)
         if self.use_lr_scheduler:
             lr_scheduler = instantiate_from_config(self.lr_scheduler_config)
 
