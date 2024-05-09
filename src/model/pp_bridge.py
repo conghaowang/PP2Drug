@@ -8,7 +8,7 @@ import copy
 import sys
 sys.path.append('..')
 
-from EGNN_backbone import EGNN, EGNN_combined_graph
+from model.EGNN_backbone import EGNN, EGNN_combined_graph
 from model.utils.time_scheduler import UniformSampler, RealUniformSampler
 from model.utils.utils_diffusion import append_dims, vp_logs, vp_logsnr, mean_flat, scatter_mean_flat, center2zero, center2zero_with_mask, center2zero_combined_graph, sample_zero_center_gaussian, sample_zero_center_gaussian_with_mask
 from script_utils import instantiate_from_config
@@ -42,7 +42,8 @@ class PPBridge(pl.LightningModule):
         self.beta_d = model_config['beta_d']
         self.beta_min = model_config['beta_min']
         self.sigma_data_end = self.sigma_data
-        self.cov_xy = cov_xy
+        # self.cov_xy = cov_xy
+        self.cov_xy = self.sigma_data**2 / 2
         self.c = 1
 
         self.weight_schedule = model_config['weight_schedule']
@@ -50,17 +51,28 @@ class PPBridge(pl.LightningModule):
 
         self.datamodule = data_config['module']
         if self.datamodule.startswith('Combined'):
+            '''
+                xT_type | xT_mode       | effect
+                none    | none          | single graph of x0
+                noise   | none          | single graph of x0 (same as above)
+                noise   | concat_graph  | x0 + noise
+                pp      | concat_graph  | x0 + pp
+            '''
             # self.xT_type = 'none'
-            self.xT_mode = 'none'
             self.xT_type = backbone_config['xT_type']    # type of xT, noise or target pp or none
+            self.xT_mode = backbone_config['xT_mode']
+            if self.xT_type == 'none':
+                assert self.xT_mode == 'none'
+            elif self.xT_type == 'pp':
+                assert self.xT_mode == 'concat_graph'
         else:
             self.xT_type = backbone_config['xT_type']    # type of xT, noise or target pp or none
-            self.xT_mode = backbone_config['xT_mode']    # mode of including xT, concat_graph or concat_latent or none 
+            self.xT_mode = backbone_config['xT_mode']    # mode of including xT, concat_graph or concat_latent or none. TODO: remove concat_latent, it's not equivariant
         if self.xT_type == 'none':
             assert self.xT_mode == 'none'
 
         self.rho = rho
-        self.num_timesteps = 40     # only for VE bridge
+        self.num_timesteps = 40     # for uniform time scheduler, not used now
         self.feature_size = backbone_config['feature_size']
         self.lr = training_config['learning_rate']
         self.lr_anneal_steps = training_config['lr_anneal_steps']
@@ -172,44 +184,82 @@ class PPBridge(pl.LightningModule):
 
     def preprocess(self, x0, xT, h0, hT, node_mask, Gt_mask=None, num_node=None, batch_info=None, use_mass=False):
         if self.datamodule.startswith('Combined'):
-            # print(num_node)
+
             # xT is already included in x0
             x0 = center2zero_combined_graph(x0, node_mask, Gt_mask)
-            xT = xT
+            # xT = xT
 
             # convert the dense graphs into sparse ones
 
             # x0_ = x0.view(x0.size(0) * x0.size(1), -1)
             # xT_ = xT.view(xT.size(0) * xT.size(1), -1)
             # node_mask_ = node_mask.view(node_mask.size(0) * node_mask.size(1), -1)
-            node_mask = node_mask.squeeze(-1)
-            # print(node_mask.size(), x0.size(), x0[0].size())
-            # x0 = x0_[node_mask_].view(x0.size(0), x0.size(1), -1)
-            # xT = xT_[node_mask_].view(xT.size(0), xT.size(1), -1)
-            bs = x0.size(0)
-            x0_, xT_, h0_, hT_ = [], [], [], []
-            sparse_Gt_mask = []
-            batch_all = []
-            for batch_idx in range(bs):
-                x0_.append(x0[batch_idx][node_mask[batch_idx]])
-                xT_.append(xT[batch_idx][node_mask[batch_idx]])
-                h0_.append(h0[batch_idx][node_mask[batch_idx]])
-                hT_.append(hT[batch_idx][node_mask[batch_idx]])
-                N = node_mask[batch_idx].sum().item()    # 2 x number of nodes
-                # print('number of nodes in the current graph', N)
-                Gt_mask_batch = torch.zeros(N, device=self.device)
-                # print(Gt_mask_batch.size(), Gt_mask_batch)
-                Gt_mask_batch[:(N//2)] = 1
-                Gt_mask_batch = Gt_mask_batch.bool()
-                sparse_Gt_mask.append(Gt_mask_batch)
-                batch_all.append(torch.ones(N, device=self.device, dtype=torch.long) * batch_idx)
-            
-            x0 = torch.cat(x0_, dim=0)
-            xT = torch.cat(xT_, dim=0)
-            h0 = torch.cat(h0_, dim=0)
-            hT = torch.cat(hT_, dim=0)
-            Gt_mask = torch.cat(sparse_Gt_mask, dim=0)
-            batch_info = torch.cat(batch_all, dim=0)
+
+            if self.xT_mode == 'concat_graph':
+                # xT could be pp graphs or noise
+                # xT and x0 are concatenated to form a combined graph
+
+                # assert self.xT_type == 'pp' or self.xT_type == 'noise'
+                node_mask = node_mask.squeeze(-1)
+                # print(node_mask.size(), x0.size(), x0[0].size())
+                # x0 = x0_[node_mask_].view(x0.size(0), x0.size(1), -1)
+                # xT = xT_[node_mask_].view(xT.size(0), xT.size(1), -1)
+                bs = x0.size(0)
+                x0_, xT_, h0_, hT_ = [], [], [], []
+                sparse_Gt_mask = []
+                batch_all = []
+                for batch_idx in range(bs):
+                    x0_.append(x0[batch_idx][node_mask[batch_idx]])
+                    xT_.append(xT[batch_idx][node_mask[batch_idx]])
+                    h0_.append(h0[batch_idx][node_mask[batch_idx]])
+                    hT_.append(hT[batch_idx][node_mask[batch_idx]])
+                    N = node_mask[batch_idx].sum().item()    # 2 x number of nodes
+                    # print('number of nodes in the current graph', N)
+                    Gt_mask_batch = torch.zeros(N, device=self.device)
+                    # print(Gt_mask_batch.size(), Gt_mask_batch)
+                    Gt_mask_batch[:(N//2)] = 1
+                    Gt_mask_batch = Gt_mask_batch.bool()
+                    sparse_Gt_mask.append(Gt_mask_batch)
+                    batch_all.append(torch.ones(N, device=self.device, dtype=torch.long) * batch_idx)
+                
+                x0 = torch.cat(x0_, dim=0)
+                xT = torch.cat(xT_, dim=0)
+                h0 = torch.cat(h0_, dim=0)
+                hT = torch.cat(hT_, dim=0)
+                Gt_mask = torch.cat(sparse_Gt_mask, dim=0)
+                batch_info = torch.cat(batch_all, dim=0)
+
+            elif self.xT_mode == 'none':
+                # xT is not concatenated to x0, but it is still used for sampling xt
+                # x0 and xT are single graphs
+                assert self.xT_type != 'pp'
+                # node_mask = node_mask.squeeze(-1)
+                Gt_mask = Gt_mask.squeeze(-1)
+                bs = x0.size(0)
+                x0_, xT_, h0_, hT_ = [], [], [], []
+                sparse_Gt_mask = []
+                batch_single = []
+                for batch_idx in range(bs):
+                    x0_.append(x0[batch_idx][Gt_mask[batch_idx]])
+                    xT_.append(xT[batch_idx][Gt_mask[batch_idx]])
+                    h0_.append(h0[batch_idx][Gt_mask[batch_idx]])
+                    hT_.append(hT[batch_idx][Gt_mask[batch_idx]])
+                    N = Gt_mask[batch_idx].sum().item()    # number of nodes
+                    assert node_mask[batch_idx].sum().item() == 2 * N
+                    # print('number of nodes in the current graph', N)
+                    Gt_mask_batch = torch.zeros(N, device=self.device)
+                    # print(Gt_mask_batch.size(), Gt_mask_batch)
+                    Gt_mask_batch[:(N)] = 1
+                    Gt_mask_batch = Gt_mask_batch.bool()
+                    sparse_Gt_mask.append(Gt_mask_batch)
+                    batch_single.append(torch.ones(N, device=self.device, dtype=torch.long) * batch_idx)
+                
+                x0 = torch.cat(x0_, dim=0)
+                xT = torch.cat(xT_, dim=0)
+                h0 = torch.cat(h0_, dim=0)
+                hT = torch.cat(hT_, dim=0)
+                Gt_mask = torch.cat(sparse_Gt_mask, dim=0)
+                batch_info = torch.cat(batch_single, dim=0)
             # x0, xT, h0, hT = x0_, xT_, h0_, hT_
             # print(x0.size(), h0.size(), xT.size(), hT.size(), x0.device, Gt_mask.size())
         else:
@@ -467,6 +517,7 @@ class PPBridge(pl.LightningModule):
         pos_weights = append_dims((weights), pos_dims)
         if self.datamodule.startswith('Combined'):
             original_x, original_h = batch.original_pos, batch.original_x
+            original_x = center2zero(original_x)
             # Gt_mask = batch.Gt_mask
             # Gt_mask_ = Gt_mask.view(h_start.size(0), h_start.size(1))
             Gt_mask_ = Gt_mask.squeeze(-1)
