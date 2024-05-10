@@ -244,7 +244,7 @@ class PharmacophoreDataset(InMemoryDataset):
     
     def make_edge_mask(self, N, max_N=86):
         adj = torch.ones((N, N), dtype=torch.bool)
-        adj[range(N), range(N)] = False
+        adj[range(N), range(N)] = True      # I wrote False all the time?????
         edge_mask = torch.zeros((max_N, max_N), dtype=torch.bool)
         edge_mask[:N, :N] = adj
         edge_mask = edge_mask.view(1, max_N * max_N).float()
@@ -338,7 +338,7 @@ class CombinedGraphDataset(PharmacophoreDataset):
         self.root = root
         self._split = split
         self._max_N = 86 * 2
-        super(PharmacophoreDataset, self).__init__(root, transform, pre_transform, pre_filter)
+        super(CombinedGraphDataset, self).__init__(root, split, transform, pre_transform, pre_filter)
         self.load(self.processed_paths[0])
 
     @property
@@ -432,6 +432,90 @@ class CombinedGraphDataset(PharmacophoreDataset):
         return x, pos, Gt_mask
 
 
+class CombinedSparseGraphDataset(PharmacophoreDataset):
+    def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None):
+        self.root = root
+        self._split = split
+        # self._max_N = 86 * 2
+        super(CombinedSparseGraphDataset, self).__init__(root, split, transform, pre_transform, pre_filter)
+        self.load(self.processed_paths[0])
+
+    @property
+    def processed_file_names(self):
+        if self._split == 'train':
+            return ['train_combined_sparse_graph.pt']
+        elif self._split == 'test':
+            return ['test_combined_sparse_graph.pt']
+        elif self._split == 'valid':
+            return ['valid_combined_sparse_graph.pt']
+        elif self._split == 'all':
+            return ['data_combined_sparse_graph.pt']
+        else: 
+            raise ValueError('split must be "train", "valid", "test" or "all"')
+        
+    def process(self):
+        data_list = []
+        # print(self.raw_file_names)
+        # print(self.raw_paths)
+        # max_N = self.get_max_N()
+        # max_N = self._max_N
+        for raw_path in tqdm(self.raw_paths):
+            filename = raw_path.split('/')[-1].split('.')[0]
+            # print(raw_path)
+            rdmol = Chem.MolFromMolFile(raw_path, sanitize=False)
+            pbmol = next(pybel.readfile("sdf", raw_path))
+            try:
+                ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None)
+            except Exception as e:
+                print(raw_path, 'Ligand init failed')
+                print(e)
+                continue
+            num_feat_class = max(len(PP_TYPE_MAPPING.keys()), len(MAP_ATOM_TYPE_AROMATIC_TO_INDEX.keys()))
+            try:
+                _, x, atomic_numbers, pos, num_nodes = self.extract_atom_features(rdmol, num_feat_class)
+                # edge_mask = self.make_edge_mask(num_nodes)
+            except KeyError:  # some elements are not considered, skip such ligands
+                continue
+            try:
+                pp_atom_indices, pp_positions, pp_types, pp_index = self.extract_pp(ligand, num_feat_class)
+                assert pp_positions.size(1) == 3
+            except Exception as e:
+                print(raw_path, 'extract pp failed')
+                print(e)
+                continue
+
+            CoM_tensor = self.compute_CoM(pos, atomic_numbers)
+
+            target_x, target_pos, node_pp_index = self.compute_target(x, pos, pp_atom_indices, pp_positions, pp_types, pp_index, CoM_tensor)
+            x_ctr, pos_ctr, Gt_mask = self.combine_target(x, pos, target_x, target_pos)
+            target_x_ctr, target_pos_ctr, _ = self.combine_target(target_x, target_pos, target_x, target_pos)
+            edge_mask_ctr = self.make_edge_mask(num_nodes * 2)
+            node_mask_ctr = torch.ones([1, num_nodes * 2], dtype=torch.bool)
+
+            data = Data(x=x_ctr, pos=pos_ctr, target_x=target_x_ctr, target_pos=target_pos_ctr, Gt_mask=Gt_mask, ligand_name=filename)
+            data_list.append(data)
+        # data, slices = self.collate(data_list)
+        # torch.save((data, slices), self.processed_paths[0])
+        # self.data, self.slices = self.collate(data_list)
+        for data in data_list:
+            print(data)
+        self.save(data_list, self.processed_paths[0])
+        # self.save()
+
+    def combine_target(self, x, pos, target_x, target_pos):
+        N = x.size(0)
+        x = torch.cat((x, target_x), dim=0)
+        pos = torch.cat((pos, target_pos), dim=0)
+        Gt_mask = torch.zeros([N * 2], dtype=torch.bool)
+        Gt_mask[:N] = True
+        return x, pos, Gt_mask
+
+    def make_edge_mask(self, N):
+        edge_mask = torch.ones((N, N), dtype=torch.bool)
+        edge_mask = edge_mask.view(1, N * N)
+        return edge_mask
+
+
 def load_dataset(module, root, split):
     dataset = module(root=root, split=split)
     return dataset
@@ -446,8 +530,9 @@ if __name__ == '__main__':
     # valid_dataset = CombinedGraphDataset(root='../../data/cleaned_crossdocked_data', split='valid')
     # test_dataset = CombinedGraphDataset(root='../../data/cleaned_crossdocked_data', split='test')
 
-    module = CombinedGraphDataset    # PharmacophoreDataset
+    module = CombinedSparseGraphDataset # CombinedGraphDataset # PharmacophoreDataset
     root = '../../data/cleaned_crossdocked_data'
+    # root = '../../data/small_dataset'
     train_dataset = load_dataset(module, root, split='train')
     valid_dataset = load_dataset(module, root, split='valid')
     test_dataset = load_dataset(module, root, split='test')
