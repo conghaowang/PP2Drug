@@ -27,7 +27,7 @@ def main(args):
     model = PPBridge(config)
     now = str(datetime.now()).replace(" ", "_").replace(":", "_")
     lr_monitor = LearningRateMonitor(logging_interval="step")
-    early_stopping = EarlyStopping(monitor='val_loss', patience=10)    # should be the ema loss
+    early_stopping = EarlyStopping(monitor='val_loss', patience=30)    # should be the ema loss
     checkpoint_callback = ModelCheckpoint(
         save_top_k=1,
         monitor="val_loss",
@@ -39,6 +39,7 @@ def main(args):
 
     trainer = Trainer(
         max_epochs=config.training.max_epochs,
+        # max_steps=1,
         devices=[int(args.gpu)],
         logger=WandbLogger(project='PP2Drug', name=log_name, log_model='all'),
         callbacks=[lr_monitor, early_stopping, checkpoint_callback],
