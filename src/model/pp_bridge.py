@@ -4,7 +4,9 @@ import torch
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import LambdaLR, ExponentialLR
 import wandb
+from omegaconf import OmegaConf
 import copy
+import os
 import sys
 sys.path.append('..')
 
@@ -130,6 +132,7 @@ class PPBridge(pl.LightningModule):
         self.total_training_steps = training_config['total_training_steps']
 
         self.save_hyperparameters(ignore=['backbone'])
+        OmegaConf.save(config=config, f=os.path.join(self.trainer.log_dir, self.bridge_type+'.yml'))
 
         # resuming from checkpoint or any step has not been implemented yet
         self.resume_checkpoint = training_config.get('resume_checkpoint', None)
