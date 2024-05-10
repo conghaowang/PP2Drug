@@ -2,7 +2,7 @@
 import lightning as pl
 import torch
 import torch.nn.functional as F
-from torch.optim.lr_scheduler import LambdaLR
+from torch.optim.lr_scheduler import LambdaLR, ExponentialLR
 import wandb
 import copy
 import sys
@@ -10,7 +10,7 @@ sys.path.append('..')
 
 from model.EGNN_backbone import EGNN, EGNN_combined_graph
 from model.utils.time_scheduler import UniformSampler, RealUniformSampler
-from model.utils.utils_diffusion import append_dims, vp_logs, vp_logsnr, mean_flat, scatter_mean_flat, center2zero, center2zero_with_mask, center2zero_combined_graph, sample_zero_center_gaussian, sample_zero_center_gaussian_with_mask
+from model.utils.utils_diffusion import append_dims, vp_logs, vp_logsnr, mean_flat, scatter_mean_flat, scatter_flat, center2zero, center2zero_with_mask, center2zero_combined_graph, sample_zero_center_gaussian, sample_zero_center_gaussian_with_mask
 from script_utils import instantiate_from_config
 
 class PPBridge(pl.LightningModule):
@@ -53,7 +53,7 @@ class PPBridge(pl.LightningModule):
         if self.datamodule.startswith('Combined'):
             '''
                 xT_type | xT_mode       | effect
-                none    | none          | single graph of x0
+                none    | none          | single graph of x0: xT is not input into backbone, but it is still used to calculate bridge scalings
                 noise   | none          | single graph of x0 (same as above)
                 noise   | concat_graph  | x0 + noise
                 pp      | concat_graph  | x0 + pp
@@ -186,82 +186,97 @@ class PPBridge(pl.LightningModule):
         if self.datamodule.startswith('Combined'):
 
             # xT is already included in x0
+            # print(x0.size(), node_mask.size(), Gt_mask.size())
             x0 = center2zero_combined_graph(x0, node_mask, Gt_mask)
             # xT = xT
 
-            # convert the dense graphs into sparse ones
+            if self.datamodule == 'CombinedGraphDataset':
+                # convert the dense graphs into sparse ones
 
-            # x0_ = x0.view(x0.size(0) * x0.size(1), -1)
-            # xT_ = xT.view(xT.size(0) * xT.size(1), -1)
-            # node_mask_ = node_mask.view(node_mask.size(0) * node_mask.size(1), -1)
+                # x0_ = x0.view(x0.size(0) * x0.size(1), -1)
+                # xT_ = xT.view(xT.size(0) * xT.size(1), -1)
+                # node_mask_ = node_mask.view(node_mask.size(0) * node_mask.size(1), -1)
 
-            if self.xT_mode == 'concat_graph':
-                # xT could be pp graphs or noise
-                # xT and x0 are concatenated to form a combined graph
+                if self.xT_mode == 'concat_graph':
+                    # xT could be pp graphs or noise
+                    # xT and x0 are concatenated to form a combined graph
 
-                # assert self.xT_type == 'pp' or self.xT_type == 'noise'
-                node_mask = node_mask.squeeze(-1)
-                # print(node_mask.size(), x0.size(), x0[0].size())
-                # x0 = x0_[node_mask_].view(x0.size(0), x0.size(1), -1)
-                # xT = xT_[node_mask_].view(xT.size(0), xT.size(1), -1)
-                bs = x0.size(0)
-                x0_, xT_, h0_, hT_ = [], [], [], []
-                sparse_Gt_mask = []
-                batch_all = []
-                for batch_idx in range(bs):
-                    x0_.append(x0[batch_idx][node_mask[batch_idx]])
-                    xT_.append(xT[batch_idx][node_mask[batch_idx]])
-                    h0_.append(h0[batch_idx][node_mask[batch_idx]])
-                    hT_.append(hT[batch_idx][node_mask[batch_idx]])
-                    N = node_mask[batch_idx].sum().item()    # 2 x number of nodes
-                    # print('number of nodes in the current graph', N)
-                    Gt_mask_batch = torch.zeros(N, device=self.device)
-                    # print(Gt_mask_batch.size(), Gt_mask_batch)
-                    Gt_mask_batch[:(N//2)] = 1
-                    Gt_mask_batch = Gt_mask_batch.bool()
-                    sparse_Gt_mask.append(Gt_mask_batch)
-                    batch_all.append(torch.ones(N, device=self.device, dtype=torch.long) * batch_idx)
+                    # assert self.xT_type == 'pp' or self.xT_type == 'noise'
+                    node_mask = node_mask.squeeze(-1)
+                    # print(node_mask.size(), x0.size(), x0[0].size())
+                    # x0 = x0_[node_mask_].view(x0.size(0), x0.size(1), -1)
+                    # xT = xT_[node_mask_].view(xT.size(0), xT.size(1), -1)
+                    bs = x0.size(0)
+                    x0_, xT_, h0_, hT_ = [], [], [], []
+                    sparse_Gt_mask = []
+                    batch_all = []
+                    for batch_idx in range(bs):
+                        x0_.append(x0[batch_idx][node_mask[batch_idx]])
+                        xT_.append(xT[batch_idx][node_mask[batch_idx]])
+                        h0_.append(h0[batch_idx][node_mask[batch_idx]])
+                        hT_.append(hT[batch_idx][node_mask[batch_idx]])
+                        N = node_mask[batch_idx].sum().item()    # 2 x number of nodes
+                        # print('number of nodes in the current graph', N)
+                        Gt_mask_batch = torch.zeros(N, device=self.device)
+                        # print(Gt_mask_batch.size(), Gt_mask_batch)
+                        Gt_mask_batch[:(N//2)] = 1
+                        Gt_mask_batch = Gt_mask_batch.bool()
+                        sparse_Gt_mask.append(Gt_mask_batch)
+                        batch_all.append(torch.ones(N, device=self.device, dtype=torch.long) * batch_idx)
+                    
+                    x0 = torch.cat(x0_, dim=0)
+                    xT = torch.cat(xT_, dim=0)
+                    h0 = torch.cat(h0_, dim=0)
+                    hT = torch.cat(hT_, dim=0)
+                    Gt_mask = torch.cat(sparse_Gt_mask, dim=0)
+                    batch_info = torch.cat(batch_all, dim=0)
+
+                elif self.xT_mode == 'none':
+                    # xT is not concatenated to x0, but it is still used for sampling xt
+                    # x0 and xT are single graphs
+                    assert self.xT_type != 'pp'
+                    # node_mask = node_mask.squeeze(-1)
+                    Gt_mask = Gt_mask.squeeze(-1)
+                    bs = x0.size(0)
+                    x0_, xT_, h0_, hT_ = [], [], [], []
+                    sparse_Gt_mask = []
+                    batch_single = []
+                    for batch_idx in range(bs):
+                        x0_.append(x0[batch_idx][Gt_mask[batch_idx]])
+                        xT_.append(xT[batch_idx][Gt_mask[batch_idx]])
+                        h0_.append(h0[batch_idx][Gt_mask[batch_idx]])
+                        hT_.append(hT[batch_idx][Gt_mask[batch_idx]])
+                        N = Gt_mask[batch_idx].sum().item()    # number of nodes
+                        assert node_mask[batch_idx].sum().item() == 2 * N
+                        # print('number of nodes in the current graph', N)
+                        Gt_mask_batch = torch.zeros(N, device=self.device)
+                        # print(Gt_mask_batch.size(), Gt_mask_batch)
+                        Gt_mask_batch[:(N)] = 1
+                        Gt_mask_batch = Gt_mask_batch.bool()
+                        sparse_Gt_mask.append(Gt_mask_batch)
+                        batch_single.append(torch.ones(N, device=self.device, dtype=torch.long) * batch_idx)
+                    
+                    x0 = torch.cat(x0_, dim=0)
+                    xT = torch.cat(xT_, dim=0)
+                    h0 = torch.cat(h0_, dim=0)
+                    hT = torch.cat(hT_, dim=0)
+                    Gt_mask = torch.cat(sparse_Gt_mask, dim=0)
+                    batch_info = torch.cat(batch_single, dim=0)
+                # x0, xT, h0, hT = x0_, xT_, h0_, hT_
+                # print(x0.size(), h0.size(), xT.size(), hT.size(), x0.device, Gt_mask.size())
+                else:
+                    raise NotImplementedError(f"Unknown xT_mode: {self.xT_mode}")
+            elif self.datamodule == 'CombinedSparseGraphDataset':
+                # data is already in sparse format
                 
-                x0 = torch.cat(x0_, dim=0)
-                xT = torch.cat(xT_, dim=0)
-                h0 = torch.cat(h0_, dim=0)
-                hT = torch.cat(hT_, dim=0)
-                Gt_mask = torch.cat(sparse_Gt_mask, dim=0)
-                batch_info = torch.cat(batch_all, dim=0)
-
-            elif self.xT_mode == 'none':
-                # xT is not concatenated to x0, but it is still used for sampling xt
-                # x0 and xT are single graphs
-                assert self.xT_type != 'pp'
-                # node_mask = node_mask.squeeze(-1)
-                Gt_mask = Gt_mask.squeeze(-1)
-                bs = x0.size(0)
-                x0_, xT_, h0_, hT_ = [], [], [], []
-                sparse_Gt_mask = []
-                batch_single = []
-                for batch_idx in range(bs):
-                    x0_.append(x0[batch_idx][Gt_mask[batch_idx]])
-                    xT_.append(xT[batch_idx][Gt_mask[batch_idx]])
-                    h0_.append(h0[batch_idx][Gt_mask[batch_idx]])
-                    hT_.append(hT[batch_idx][Gt_mask[batch_idx]])
-                    N = Gt_mask[batch_idx].sum().item()    # number of nodes
-                    assert node_mask[batch_idx].sum().item() == 2 * N
-                    # print('number of nodes in the current graph', N)
-                    Gt_mask_batch = torch.zeros(N, device=self.device)
-                    # print(Gt_mask_batch.size(), Gt_mask_batch)
-                    Gt_mask_batch[:(N)] = 1
-                    Gt_mask_batch = Gt_mask_batch.bool()
-                    sparse_Gt_mask.append(Gt_mask_batch)
-                    batch_single.append(torch.ones(N, device=self.device, dtype=torch.long) * batch_idx)
-                
-                x0 = torch.cat(x0_, dim=0)
-                xT = torch.cat(xT_, dim=0)
-                h0 = torch.cat(h0_, dim=0)
-                hT = torch.cat(hT_, dim=0)
-                Gt_mask = torch.cat(sparse_Gt_mask, dim=0)
-                batch_info = torch.cat(batch_single, dim=0)
-            # x0, xT, h0, hT = x0_, xT_, h0_, hT_
-            # print(x0.size(), h0.size(), xT.size(), hT.size(), x0.device, Gt_mask.size())
+                x0 = x0[0]
+                Gt_mask = Gt_mask[0]
+                node_mask = node_mask[0]
+                # print(x0.size(), xT.size(), h0.size(), hT.size(), Gt_mask.size(), node_mask.size())
+                # print(batch_info)
+                # pass
+            else:
+                raise ValueError(f"Unknown datamodule: {self.datamodule}")
         else:
             # move the center to zero
             x0 = center2zero_with_mask(x0, node_mask)
@@ -278,10 +293,19 @@ class PPBridge(pl.LightningModule):
             node_mask: mask out sparse nodes
         '''
 
-        node_mask = batch.node_mask
-        edge_mask = batch.edge_mask
-        CoM = batch.CoM
-        num_nodes = batch.num_nodes
+        if self.datamodule == 'CombinedSparseGraphDataset':
+            # information below is not useful for sparse graphs
+            num_nodes = batch.x.size(0)
+            # print(num_nodes)
+            node_mask = torch.ones([1, num_nodes], device=batch.x.device, dtype=torch.bool)
+            # edge_mask = torch.ones([1, num_nodes * num_nodes], device=batch.x.device, dtype=torch.bool)
+            edge_mask = None
+            CoM = None
+        else:
+            node_mask = batch.node_mask
+            edge_mask = batch.edge_mask
+            CoM = batch.CoM
+            num_nodes = batch.num_nodes
         batch_info = batch.batch
 
         node_mask = node_mask.unsqueeze(-1)
@@ -310,6 +334,7 @@ class PPBridge(pl.LightningModule):
         if self.datamodule.startswith('Combined'):
             # GT is already included in Gt, so xT and hT don't matter
             Gt_mask = batch.Gt_mask.view(node_mask.size(0), node_mask.size(1), -1)
+            # print(Gt_mask.size(), node_mask.size())
             x0, xT, h0, hT, Gt_mask, batch_info = self.preprocess(x0, xT, h0, hT, node_mask, Gt_mask=Gt_mask, num_node=num_nodes, batch_info=batch_info)
         else:
             x0, xT, h0, hT, _, _ = self.preprocess(x0, xT, h0, hT, node_mask)
@@ -426,6 +451,7 @@ class PPBridge(pl.LightningModule):
                
         rescaled_t = 1000 * 0.25 * torch.log(sigmas + 1e-44)
         if self.datamodule.startswith('Combined'):
+            # print(h_t.size(), rescaled_t.size(), c_in.size())
             output_h, output_x = backbone(c_in * h_t, c_in * x_t, rescaled_t, Gt_mask, batch_info)
         else:
             output_h, output_x = backbone(c_in * h_t, c_in * x_t, h_T, x_T, rescaled_t, batch_info, node_mask, edge_mask, Gt_mask, self.xT_mode)    # model_output is the output of F_theta (something between x0^hat and the noise at t)
@@ -496,10 +522,14 @@ class PPBridge(pl.LightningModule):
             x_t_sampled = bridge_sample(x_start, x_T, sigmas, pos_dims, noise_x)
             # print(h_start.size(), h_t_sampled.size(), Gt_mask_.size())
 
-            Gt_mask = Gt_mask.unsqueeze(-1)
+            if self.datamodule == 'CombinedGraphDataset':
+                # for CombinedSparseDataset, do nothing
+                Gt_mask = Gt_mask.unsqueeze(-1)
             # h_start_ = h_start.view(h_start.size(0) * h_start.size(1), -1)
             # h_t_sampled_ = h_t_sampled.view(h_t_sampled.size(0) * h_t_sampled.size(1), -1)
+            # print(Gt_mask.size())
             h_t = h_start * (~Gt_mask) + h_t_sampled * Gt_mask
+            # print(h_t.size())
             # h_t = h_t.view(h_start.size(0), h_start.size(1), -1)
 
             # x_start_ = x_start.view(x_start.size(0) * x_start.size(1), -1)
@@ -514,36 +544,45 @@ class PPBridge(pl.LightningModule):
 
         weights = self.get_weightings(sigmas)
         x_weights =  append_dims((weights), feat_dims)
-        pos_weights = append_dims((weights), pos_dims)
+        pos_weights = append_dims((weights), pos_dims)  
+        # print(x_weights==pos_weights)
         if self.datamodule.startswith('Combined'):
-            original_x, original_h = batch.original_pos, batch.original_x
+            Gt_mask_ = Gt_mask.squeeze(-1)
+
+            if self.datamodule == 'CombinedSparseGraphDataset':
+                original_x, original_h = batch.pos[Gt_mask_], batch.x[Gt_mask_]
+            else:
+                original_x, original_h = batch.original_pos, batch.original_x
             original_x = center2zero(original_x)
             # Gt_mask = batch.Gt_mask
             # Gt_mask_ = Gt_mask.view(h_start.size(0), h_start.size(1))
-            Gt_mask_ = Gt_mask.squeeze(-1)
             
             # print(Gt_mask_.sum())
             # print(denoised_x[Gt_mask_].size(), original_h.size())
-            losses["x_mse"] = mean_flat((denoised_x[Gt_mask_] - original_h) ** 2)      
-            # losses['pos_mse'] = mean_flat((denoised_pos[Gt_mask_] - original_x) ** 2)
-            losses["pos_mse"] = scatter_mean_flat((denoised_pos[Gt_mask_] - original_x) ** 2, batch_info[Gt_mask_])
-            losses["weighted_x_mse"] = mean_flat(x_weights[Gt_mask_] * (denoised_x[Gt_mask_] - original_h) ** 2)
-            # losses["weighted_pos_mse"] = mean_flat(pos_weights[Gt_mask_] * (denoised_pos[Gt_mask_] - original_x) ** 2)
-            losses["weighted_pos_mse"] = scatter_mean_flat(pos_weights[Gt_mask_] * (denoised_pos[Gt_mask_] - original_x) ** 2, batch_info[Gt_mask_])
 
-            # losses["x_mse"] = mean_flat((denoised_x - original_h) ** 2)      
-            # losses['pos_mse'] = mean_flat((denoised_pos - original_x) ** 2)
-            # losses["weighted_x_mse"] = mean_flat(x_weights * (denoised_x - original_h) ** 2)
-            # losses["weighted_pos_mse"] = mean_flat(pos_weights * (denoised_pos - original_x) ** 2)
+            loss_x_mse = (denoised_x[Gt_mask_] - original_h) ** 2
+            loss_pos_mse = (denoised_pos[Gt_mask_] - original_x) ** 2
+            losses["x_mse"] = mean_flat(loss_x_mse)      
+            # losses['pos_mse'] = mean_flat((denoised_pos[Gt_mask_] - original_x) ** 2)
+            losses["pos_mse"] = scatter_mean_flat(loss_pos_mse, batch_info[Gt_mask_])
+            losses["weighted_x_mse"] = mean_flat(x_weights[Gt_mask_] * loss_x_mse)
+            # losses["weighted_pos_mse"] = mean_flat(pos_weights[Gt_mask_] * (denoised_pos[Gt_mask_] - original_x) ** 2)
+            losses["weighted_pos_mse"] = scatter_mean_flat(pos_weights[Gt_mask_] * loss_pos_mse, batch_info[Gt_mask_])
+
+            losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_mse, dim=-1) + 
+                                               torch.sum(pos_weights[Gt_mask_] * loss_pos_mse, dim=-1),
+                                               batch_info[Gt_mask_])
+
         else:
-            losses["x_mse"] = mean_flat((denoised_x - h_start) ** 2)      # x should be the atom type one hot encoding, so don't use mse loss!!!
+            losses["x_mse"] = mean_flat((denoised_x - h_start) ** 2)      # x should be the atom type one hot encoding, think twice of mse loss
             losses['pos_mse'] = mean_flat((denoised_pos - x_start) ** 2)
             losses["weighted_x_mse"] = mean_flat(x_weights * (denoised_x - h_start) ** 2)
             losses["weighted_pos_mse"] = mean_flat(pos_weights * (denoised_pos - x_start) ** 2)
-        losses['loss_x'] = losses["weighted_x_mse"]
-        losses['loss_pos'] = losses["weighted_pos_mse"]
+            losses['loss_x'] = losses["weighted_x_mse"]
+            losses['loss_pos'] = losses["weighted_pos_mse"]
 
-        losses["loss"] = self.loss_x_weight * losses["loss_x"] + losses["loss_pos"]  # should include additoinal weights? targetdiff set the weight of loss_x as 100
+            losses["loss"] = self.loss_x_weight * losses["loss_x"] + losses["loss_pos"]  # should include additoinal weights?
+        
 
         return losses
 
@@ -601,8 +640,8 @@ class PPBridge(pl.LightningModule):
             print("Setting up LambdaLR scheduler...")
             lr_scheduler = [
                 {
-                    'scheduler': LambdaLR(optimizer, lr_lambda=lr_scheduler.schedule),
-                    'interval': 'step',
+                    'scheduler': ExponentialLR(optimizer, gamma=0.95), # LambdaLR(optimizer, lr_lambda=lr_scheduler.schedule),
+                    'interval': 'epoch',
                     'frequency': 1,
                     # 'gradient_clip_val': 0.5, 
                     # 'gradient_clip_algorithm': 'norm'  # Choose 'norm' or 'value'

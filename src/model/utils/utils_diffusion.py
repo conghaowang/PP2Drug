@@ -43,6 +43,11 @@ def scatter_mean_flat(tensor, batch):
     # print('mean loss size', loss.size())
     return loss
 
+def scatter_flat(tensor, batch):
+    loss = scatter_mean(tensor, batch, dim=0)       # already summed along the final dim
+    loss = torch.mean(loss)
+    return loss
+
 
 def center2zero(x):
     if x == None:
@@ -78,7 +83,7 @@ def center2zero_with_mask(x, node_mask, check_mask=True):
 
 
 def center2zero_combined_graph(x, node_mask, Gt_mask, mode='g1'):
-    GT_mask = node_mask & Gt_mask
+    GT_mask = node_mask & (~Gt_mask)
     # print(node_mask.size(), Gt_mask.size(), GT_mask.size())
     x_ = x.detach().clone()
     xt_ = center2zero_with_mask(x_, Gt_mask, check_mask=False)
