@@ -30,19 +30,19 @@ PP_TYPE_MAPPING = {
     'Halogen': 7
 }
 MAP_ATOM_TYPE_AROMATIC_TO_INDEX = {
-    (1, False): 0,
-    (6, False): 1,
-    (6, True): 2,
-    (7, False): 3,
-    (7, True): 4,
-    (8, False): 5,
-    (8, True): 6,
-    (9, False): 7,
-    (15, False): 8,
-    (15, True): 9,
-    (16, False): 10,
-    (16, True): 11,
-    (17, False): 12
+    (1, False): 0,  # H
+    (6, False): 1,  # C
+    (6, True): 2,   # C.ar
+    (7, False): 3,  # N
+    (7, True): 4,   # N.ar
+    (8, False): 5,  # O
+    (8, True): 6,   # O.ar
+    (9, False): 7,  # F
+    (15, False): 8, # P
+    (15, True): 9,  # P.ar
+    (16, False): 10,# S
+    (16, True): 11, # S.ar
+    (17, False): 12 # Cl
 }
 
 
