@@ -1,0 +1,51 @@
+model:
+  denoiser:
+    bridge_type: 'vp'
+    beta_d: 2
+    beta_min: 0.1
+    sigma_data: 0.5
+    sigma_max: 1
+    sigma_min: 0.0001
+    schedule_sampler: 'real-uniform' # 'uniform' # 'real-uniform'
+    use_ema: true
+    ema_decay: 0.999
+    weight_decay: 1e-12
+    weight_schedule: 'uniform' # 'uniform' # 'bridge_karras'
+    loss_x_weight: 1e+3
+
+  backbone: 
+    type: 'EGNN'
+    feature_size: 8
+    num_layers: 10
+    hidden_size: 512
+    time_cond: True # False
+    xT_type: 'noise' # 'noise' # 'none' # 'pp'
+    xT_mode: 'concat_graph' # 'concat_graph' # 'none'
+
+training:
+  batch_size: 7000
+  log_interval: 100
+  save_interval: 1000
+  test_interval: 1000
+  total_training_steps: 10000000
+  learning_rate: 0.01   # now using decay lr scheduler, so start from a high rate
+  lr_anneal_steps: 0
+  max_epochs: 100
+  use_lr_scheduler: true
+  lr_scheduler_config: # 10000 warmup steps
+    target: model.utils.lr_scheduler.LambdaLinearScheduler
+    params:
+      warm_up_steps: [10000]
+      cycle_lengths: [10000000000000]
+      f_start: [1.e-6]
+      f_max: [1.]
+      f_min: [ 1.]
+
+sampling:
+  batch_size: 1000
+
+data:
+  root: ../data/qm9
+  max_node_num: 29
+  coord_dim: 3
+  module: QM9Dataset # CombinedSparseGraphDataset # CombinedGraphDataset # PharmacophoreDataset
