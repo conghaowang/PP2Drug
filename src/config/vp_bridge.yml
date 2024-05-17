@@ -10,14 +10,14 @@ model:
     use_ema: true
     ema_decay: 0.999
     weight_decay: 1e-12
-    weight_schedule: 'uniform' # 'bridge_karras'
-    loss_x_weight: 1e+4
+    weight_schedule: 'uniform' # 'uniform' # 'bridge_karras'
+    loss_x_weight: 1e+3
 
   backbone: 
     type: 'EGNN'
     feature_size: 13
-    num_layers: 6
-    hidden_size: 128
+    num_layers: 10
+    hidden_size: 512
     time_cond: True # False
     xT_type: 'pp' # 'noise' # 'none' # 'pp'
     xT_mode: 'concat_graph' # 'concat_graph' # 'none'
@@ -40,6 +40,9 @@ training:
       f_start: [1.e-6]
       f_max: [1.]
       f_min: [ 1.]
+
+sampling:
+  batch_size: 1000
 
 data:
   root: ../data/cleaned_crossdocked_data
