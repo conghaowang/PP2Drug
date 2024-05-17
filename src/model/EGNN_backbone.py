@@ -252,12 +252,13 @@ class EnBaseLayer(nn.Module):
 
 
 class EGNN_combined_graph(nn.Module):
-    def __init__(self, num_layers, hidden_dim, edge_feat_dim, num_r_gaussian, time_cond=True, k=32, cutoff=10.0, cutoff_mode='knn',
+    def __init__(self, num_layers, input_dim, hidden_dim, edge_feat_dim, num_r_gaussian, time_cond=True, k=32, cutoff=10.0, cutoff_mode='knn',
                  update_x=True, act_fn='silu', norm=False):
         super().__init__()
         # Build the network
         self.num_layers = num_layers
         self.time_cond = time_cond
+        self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.edge_feat_dim = edge_feat_dim
         self.num_r_gaussian = num_r_gaussian
@@ -269,8 +270,8 @@ class EGNN_combined_graph(nn.Module):
         self.cutoff_mode = cutoff_mode
         self.distance_expansion = GaussianSmearing(stop=cutoff, num_gaussians=num_r_gaussian)
         if self.time_cond:
-            self.embedding_in = nn.Linear(self.hidden_dim + 1, self.hidden_dim)
-            self.embedding_out = nn.Linear(self.hidden_dim, self.hidden_dim)
+            self.embedding_in = nn.Linear(self.input_dim + 1, self.hidden_dim)
+            self.embedding_out = nn.Linear(self.hidden_dim, self.input_dim)
         self.net = self._build_network()
 
     def _build_network(self):
@@ -337,7 +338,7 @@ class EGNN_combined_graph(nn.Module):
             # print(h.device, t.device, Gt_mask.device)
             h = torch.cat([h, t], dim=-1)
             # print(h.device, Gt_mask.device)
-            h = self.embedding_in(h) * Gt_mask[:, None] + h_ * (~Gt_mask)[:, None]
+            h = self.embedding_in(h) # * Gt_mask[:, None] + h_ * (~Gt_mask)[:, None]
         all_x = [x]
         all_h = [h]
         for l_idx, layer in enumerate(self.net):

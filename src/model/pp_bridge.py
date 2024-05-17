@@ -11,6 +11,7 @@ import sys
 sys.path.append('..')
 
 from model.EGNN_backbone import EGNN, EGNN_combined_graph
+from model.SE3_transformer_backbone import SE3Transformer
 from model.utils.time_scheduler import UniformSampler, RealUniformSampler
 from model.utils.utils_diffusion import append_dims, vp_logs, vp_logsnr, mean_flat, scatter_mean_flat, scatter_flat, center2zero, center2zero_with_mask, center2zero_combined_graph, sample_zero_center_gaussian, sample_zero_center_gaussian_with_mask
 from script_utils import instantiate_from_config
@@ -99,7 +100,8 @@ class PPBridge(pl.LightningModule):
                 # )
                 self.backbone = EGNN_combined_graph(
                     num_layers=backbone_config['num_layers'],
-                    hidden_dim=backbone_config['feature_size'],
+                    input_dim=backbone_config['feature_size'],
+                    hidden_dim=backbone_config['hidden_size'],
                     edge_feat_dim=4,
                     num_r_gaussian=1,
                     time_cond=backbone_config['time_cond'],
@@ -117,6 +119,26 @@ class PPBridge(pl.LightningModule):
                         xT_mode=self.xT_mode,
                         data_mode='single',
                     )
+        elif backbone_config['type'] == 'SE3Transformer':
+            self.backbone = SE3Transformer(
+                num_blocks=backbone_config['num_blocks'],
+                num_layers=backbone_config['num_layers'],
+                hidden_dim=backbone_config['hidden_dim'],
+                n_heads=backbone_config['n_heads'],
+                k=backbone_config['knn'],
+                edge_feat_dim=4,
+                num_r_gaussian=backbone_config['num_r_gaussian'],
+                num_node_types=backbone_config['num_node_types'],
+                act_fn=backbone_config['act_fn'],
+                norm=backbone_config['norm'],
+                cutoff_mode=backbone_config['cutoff_mode'],
+                ew_net_type=backbone_config['ew_net_type'],
+                num_x2h=backbone_config['num_x2h'],
+                num_h2x=backbone_config['num_h2x'],
+                r_max=backbone_config['r_max'],
+                x2h_out_fc=backbone_config['x2h_out_fc'],
+                sync_twoup=backbone_config['sync_twoup']
+            )
         else:
             raise NotImplementedError(f"Backbone type {backbone_config['type']} not implemented")
 
