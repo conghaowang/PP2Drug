@@ -5,8 +5,8 @@ from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.loggers import WandbLogger
 import argparse
-
-from script_utils import load_data
+import os
+from script_utils import load_data, load_qm9_data
 from model.pp_bridge import PPBridge
 
 
@@ -20,9 +20,12 @@ def main(args):
     # train_dataset, train_loader = load_data(dataset_root_path, split='all', batch_size=config.training.batch_size)
 
     datamodule = config.data.module
-    train_dataset, train_loader = load_data(datamodule, dataset_root_path, split='train', batch_size=config.training.batch_size)
-    val_dataset, val_loader = load_data(datamodule, dataset_root_path, split='valid', batch_size=config.training.batch_size)
-    # test_dataset, test_loader = load_data(dataset_root_path, split='test', batch_size=config.training.batch_size)
+    if datamodule == 'QM9Dataset':
+        _, _, train_loader, val_loader = load_qm9_data(root=dataset_root_path, split='train', batch_size=config.training.batch_size)
+    else:
+        _, train_loader = load_data(datamodule, dataset_root_path, split='train', batch_size=config.training.batch_size)
+        _, val_loader = load_data(datamodule, dataset_root_path, split='valid', batch_size=config.training.batch_size)
+        # test_dataset, test_loader = load_data(dataset_root_path, split='test', batch_size=config.training.batch_size)
 
     model = PPBridge(config)
     now = str(datetime.now()).replace(" ", "_").replace(":", "_")
@@ -31,7 +34,7 @@ def main(args):
     checkpoint_callback = ModelCheckpoint(
         save_top_k=1,
         monitor="val_loss",
-        dirpath=f"lightning_logs/{log_name}_{now}",
+        dirpath=f"lightning_logs/{log_name}_{datamodule}_{now}",
         mode="min",
         filename='epoch={epoch:02d}-val_loss={val_loss:.2f}',
         auto_insert_metric_name=False,
@@ -50,6 +53,7 @@ def main(args):
         gradient_clip_algorithm='norm',
     )
     trainer.fit(model, train_loader, val_loader)
+    OmegaConf.save(config=config, f=os.path.join('src/lightning_logs', f'{log_name}_{datamodule}_{now}', args.config.split('/')[-1]))     # trainer.log_dir is the path of main.py, not the log path
 
 
 if __name__ == '__main__':
