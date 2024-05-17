@@ -7,7 +7,9 @@ import numpy as np
 import glob
 import os
 import random
+import pickle
 from tqdm import tqdm
+from collections import defaultdict
 import sys
 sys.path.append('../')
 from data_processing.ligand import Ligand
@@ -155,12 +157,17 @@ class PharmacophoreDataset(InMemoryDataset):
         print('The maximum number of atoms in the dataset is:', max_N)
         return max_N
 
+    def save_pp_info(self, pp_info):
+        with open(os.path.join(self.root, 'metadata', 'pp_info.pkl'), 'wb') as f:
+            pickle.dump(pp_info, f)
+
     def process(self):
         data_list = []
         # print(self.raw_file_names)
         # print(self.raw_paths)
         # max_N = self.get_max_N()
         max_N = self._max_N
+        pp_info = defaultdict(dict)
         for raw_path in tqdm(self.raw_paths):
             filename = raw_path.split('/')[-1].split('.')[0]
             # print(raw_path)
@@ -193,12 +200,19 @@ class PharmacophoreDataset(InMemoryDataset):
                 print(e)
                 continue
             # print(raw_path, pos.size())
-
+            
             # should we move CoM to zero during data 
             CoM_tensor = self.compute_CoM(pos, atomic_numbers)
             # pos = self.CoM2zero(pos, CoM)
             # pp_positions = self.CoM2zero(pp_positions, CoM)
             target_x, target_pos, node_pp_index = self.compute_target(x, pos, pp_atom_indices, pp_positions, pp_types, pp_index, CoM_tensor)
+            pp_info[filename].update({
+                'pp_atom_indices': pp_atom_indices,
+                'pp_positions': pp_positions,
+                'pp_types': pp_types,
+                'pp_index': pp_index,
+                'node_pp_index': node_pp_index
+            })
 
             x, node_mask = to_dense_batch(x, max_num_nodes=max_N)
             pos, _ = to_dense_batch(pos, max_num_nodes=max_N)
@@ -211,6 +225,7 @@ class PharmacophoreDataset(InMemoryDataset):
         # data, slices = self.collate(data_list)
         # torch.save((data, slices), self.processed_paths[0])
         self.save(data_list, self.processed_paths[0])
+        self.save_pp_info(pp_info)
 
     def extract_atom_features(self, mol, num_class):
         '''
@@ -312,7 +327,7 @@ class PharmacophoreDataset(InMemoryDataset):
         for atom_indices in pp_atom_indices:
             atom_in_pp += atom_indices
         for i in range(x.size(0)):
-            if i not in atom_in_pp:  # if the atom is not in any pharmacophore, we set its target type to Linker:0 and target position to 0
+            if i not in atom_in_pp:  # if the atom is not in any pharmacophore, we set its target type to Linker:0 and target position to CoM plus a bit noise
                 target_x[i] = torch.nn.functional.one_hot(torch.tensor([0]), num_classes=pp_types.size(1)).to(torch.float)
                 # target_pos[i] = torch.zeros(pos.size(1))
                 target_pos[i] = CoM_tensor + torch.randn_like(CoM_tensor) * noise_std
@@ -497,8 +512,8 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
         # data, slices = self.collate(data_list)
         # torch.save((data, slices), self.processed_paths[0])
         # self.data, self.slices = self.collate(data_list)
-        for data in data_list:
-            print(data)
+        # for data in data_list:
+        #     print(data)
         self.save(data_list, self.processed_paths[0])
         # self.save()
 
