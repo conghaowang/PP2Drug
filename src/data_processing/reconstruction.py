@@ -18,17 +18,17 @@ MAP_INDEX_TO_ATOM_TYPE_AROMATIC = {v: k for k, v in MAP_ATOM_TYPE_AROMATIC_TO_IN
 # MAP_INDEX_TO_ATOM_TYPE_ONLY = {v: k for k, v in ATOM_TYPE_MAPPING.items()}
 
 
-def get_atomic_number_from_index(index, mode='add_aromatic'):
+def get_atomic_number_from_index(index, mode='add_aromatic', index_to_atom_type=MAP_INDEX_TO_ATOM_TYPE_AROMATIC):
     if mode == 'add_aromatic':
-        atomic_number = [MAP_INDEX_TO_ATOM_TYPE_AROMATIC[i][0] for i in index.tolist()]
+        atomic_number = [index_to_atom_type[i][0] for i in index.tolist()]
     else:
         raise ValueError('mode not recognized')
     return atomic_number
 
 
-def is_aromatic_from_index(index, mode='add_aromatic'):
+def is_aromatic_from_index(index, mode='add_aromatic', index_to_atom_type=MAP_INDEX_TO_ATOM_TYPE_AROMATIC):
     if mode == 'add_aromatic':
-        is_aromatic = [MAP_INDEX_TO_ATOM_TYPE_AROMATIC[i][1] for i in index.tolist()]
+        is_aromatic = [index_to_atom_type[i][1] for i in index.tolist()]
     else:
         raise ValueError('mode not recognized')
     return is_aromatic
