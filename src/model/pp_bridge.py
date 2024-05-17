@@ -52,7 +52,7 @@ class PPBridge(pl.LightningModule):
         self.bridge_type = model_config['bridge_type']    # previous pred_mode
 
         self.datamodule = data_config['module']
-        if self.datamodule.startswith('Combined'):
+        if self.datamodule.startswith('Combined') or self.datamodule == 'QM9Dataset':
             '''
                 xT_type | xT_mode       | effect
                 none    | none          | single graph of x0: xT is not input into backbone, but it is still used to calculate bridge scalings
@@ -85,7 +85,7 @@ class PPBridge(pl.LightningModule):
             assert self.lr_scheduler_config is not None
 
         if backbone_config['type'] == 'EGNN':
-            if self.datamodule.startswith('Combined'):
+            if self.datamodule.startswith('Combined') or self.datamodule == 'QM9Dataset':
                 # self.backbone = EGNN(
                 #     max_feat_num=backbone_config['feature_size'], 
                 #     coord_dim=data_config['coord_dim'],
@@ -132,8 +132,10 @@ class PPBridge(pl.LightningModule):
         self.total_training_steps = training_config['total_training_steps']
 
         self.save_hyperparameters(ignore=['backbone'])
-        OmegaConf.save(config=config, f=os.path.join(self.trainer.log_dir, self.bridge_type+'.yml'))
-
+        try:
+            OmegaConf.save(config=config, f=os.path.join(self.trainer.log_dir, self.bridge_type+'.yml'))
+        except Exception as e:
+            print('config not saved since', e)
         # resuming from checkpoint or any step has not been implemented yet
         self.resume_checkpoint = training_config.get('resume_checkpoint', None)
         self._resume_checkpoint()
@@ -186,7 +188,7 @@ class PPBridge(pl.LightningModule):
     #     self.backbone.load_state_dict(checkpoint['state_dict'])
 
     def preprocess(self, x0, xT, h0, hT, node_mask, Gt_mask=None, num_node=None, batch_info=None, use_mass=False):
-        if self.datamodule.startswith('Combined'):
+        if self.datamodule.startswith('Combined') or self.datamodule == 'QM9Dataset':
 
             # xT is already included in x0
             # print(x0.size(), node_mask.size(), Gt_mask.size())
@@ -269,12 +271,51 @@ class PPBridge(pl.LightningModule):
                 # print(x0.size(), h0.size(), xT.size(), hT.size(), x0.device, Gt_mask.size())
                 else:
                     raise NotImplementedError(f"Unknown xT_mode: {self.xT_mode}")
-            elif self.datamodule == 'CombinedSparseGraphDataset':
+            elif self.datamodule == 'CombinedSparseGraphDataset' or self.datamodule == 'QM9Dataset':
                 # data is already in sparse format
                 
                 x0 = x0[0]
                 Gt_mask = Gt_mask[0]
                 node_mask = node_mask[0]
+
+                if self.xT_type == 'noise':
+                    # xT = xT[0]  # (1, N, 3) => (N, 3)
+                    # hT = hT[0]  # (1, N, h) => (N, h)
+                    bs = torch.max(batch_info).item() + 1
+
+                    x0_, xT_, h0_, hT_ = [], [], [], []
+                    for i in range(bs):
+                        batch_idx = (batch_info == i)
+                        x0_batch = x0[batch_idx]
+                        # xT_batch = xT[batch_idx]
+                        h0_batch = h0[batch_idx]
+                        # hT_batch = hT[batch_idx]
+                        Gt_mask_batch = Gt_mask[batch_idx].squeeze(-1)
+                        # print(x0_batch.size(), h0_batch.size(), Gt_mask_batch.size())
+
+                        # directly change x0 and h0, and rebuild xT and hT
+                        # x0_Gt = x0_batch[Gt_mask_batch]
+                        # x0_noise = torch.randn_like(x0_Gt, device=x0.device)
+                        x0_noise = sample_zero_center_gaussian(x0_batch[Gt_mask_batch].size(), device=x0.device)
+                        # x0_noise = xT_batch[~Gt_mask_batch]
+                        # x0_batch_ = torch.cat([x0_Gt, x0_noise], dim=0)
+                        xT_batch_ = torch.cat([x0_noise, x0_noise], dim=0)
+                        # x0_.append(x0_batch_)
+                        xT_.append(xT_batch_)
+                        x0[batch_idx][~Gt_mask_batch] = x0_noise
+
+                        # h0_Gt = h0_batch[Gt_mask_batch]
+                        h0_noise = torch.randn_like(h0_batch[Gt_mask_batch], device=h0.device)
+                        # h0_noise = hT_batch[~Gt_mask_batch]
+                        # h0_batch_ = torch.cat([h0_Gt, h0_noise], dim=0)
+                        hT_batch_ = torch.cat([h0_noise, h0_noise], dim=0)
+                        # h0_.append(h0_batch_)
+                        hT_.append(hT_batch_)
+                        h0[batch_idx][~Gt_mask_batch] = h0_noise
+
+                    xT = torch.cat(xT_, dim=0)
+                    hT = torch.cat(hT_, dim=0)
+
                 # print(x0.size(), xT.size(), h0.size(), hT.size(), Gt_mask.size(), node_mask.size())
                 # print(batch_info)
                 # pass
@@ -296,7 +337,7 @@ class PPBridge(pl.LightningModule):
             node_mask: mask out sparse nodes
         '''
 
-        if self.datamodule == 'CombinedSparseGraphDataset':
+        if self.datamodule == 'CombinedSparseGraphDataset' or self.datamodule == 'QM9Dataset':
             # information below is not useful for sparse graphs
             num_nodes = batch.x.size(0)
             # print(num_nodes)
@@ -318,11 +359,16 @@ class PPBridge(pl.LightningModule):
         if self.xT_type == 'noise':
             # print('Using noise as xT')
             # h0, x0 = batch.x, batch.pos
+            # print(node_mask.size())
             hT = torch.randn_like(h0, device=h0.device)
             hT = F.one_hot(hT.argmax(dim=-1), num_classes=h0.size(-1)).float().to(h0.device)
+            # print(hT.size())
             hT = hT * node_mask
+            # print(hT.size())
             xT = torch.randn_like(x0, device=x0.device)
+            # print(xT.size())
             xT = xT * node_mask
+            # print(xT.size())
         # elif self.xT_type == 'none':
         #     hT = None
         #     xT = None 
@@ -334,7 +380,7 @@ class PPBridge(pl.LightningModule):
             
        
         # print(node_mask.size())
-        if self.datamodule.startswith('Combined'):
+        if self.datamodule.startswith('Combined') or self.datamodule == 'QM9Dataset':
             # GT is already included in Gt, so xT and hT don't matter
             Gt_mask = batch.Gt_mask.view(node_mask.size(0), node_mask.size(1), -1)
             # print(Gt_mask.size(), node_mask.size())
@@ -453,7 +499,7 @@ class PPBridge(pl.LightningModule):
         # print('c_skip, c_out, c_in', c_skip, c_out, c_in)
                
         rescaled_t = 1000 * 0.25 * torch.log(sigmas + 1e-44)
-        if self.datamodule.startswith('Combined'):
+        if self.datamodule.startswith('Combined') or self.datamodule == 'QM9Dataset':
             # print(h_t.size(), rescaled_t.size(), c_in.size())
             output_h, output_x = backbone(c_in * h_t, c_in * x_t, rescaled_t, Gt_mask, batch_info)
         else:
@@ -463,7 +509,7 @@ class PPBridge(pl.LightningModule):
         return output_h, output_x, denoised_h, denoised_x   # denoised is the output of the D_theta (the predicted x0^hat)
 
     def sample_noise(self, h_start, x_start, mask=None):
-        if self.datamodule.startswith('Combined'):  # features are in sparse representations (dim is 2)
+        if self.datamodule.startswith('Combined') or self.datamodule == 'QM9Dataset':  # features are in sparse representations (dim is 2)
             noise_h = sample_zero_center_gaussian(h_start.size(), self.device)
             noise_x = sample_zero_center_gaussian(x_start.size(), self.device)
         else:
@@ -474,13 +520,14 @@ class PPBridge(pl.LightningModule):
     
     def compute_losses(self, backbone, batch, sigmas, noise_h=None, noise_x=None):
         h_start, h_T, x_start, x_T, node_mask, edge_mask, Gt_mask, _, num_nodes, batch_info = self.get_input(batch)
-        # sample CoM-free noise 
+        # print(h_start.size(), h_T.size(), x_start.size(), x_T.size(), Gt_mask.size())
 
+        # sample CoM-free noise 
         if noise_h is None and noise_x is None:
             # noise = torch.randn_like(h_start)
             noise_h, noise_x = self.sample_noise(h_start, x_start, node_mask)
 
-        if self.datamodule.startswith('Combined'):
+        if self.datamodule.startswith('Combined') or self.datamodule == 'QM9Dataset':
             # print(batch_info)
             sigmas = sigmas[batch_info]
             # print('extending selected t to', sigmas.size())
@@ -518,7 +565,7 @@ class PPBridge(pl.LightningModule):
 
         # h_t = bridge_sample(h_start, h_T, sigmas, feat_dims, noise_h)
         # x_t = bridge_sample(x_start, x_T, sigmas, pos_dims, noise_x)
-        if self.datamodule.startswith('Combined'):
+        if self.datamodule.startswith('Combined') or self.datamodule == 'QM9Dataset':
             # only sample the Gt part but keep the GT part the same
             # Gt_mask = batch.Gt_mask
             h_t_sampled = bridge_sample(h_start, h_T, sigmas, feat_dims, noise_h)
@@ -549,10 +596,10 @@ class PPBridge(pl.LightningModule):
         x_weights =  append_dims((weights), feat_dims)
         pos_weights = append_dims((weights), pos_dims)  
         # print(x_weights==pos_weights)
-        if self.datamodule.startswith('Combined'):
+        if self.datamodule.startswith('Combined') or self.datamodule == 'QM9Dataset':
             Gt_mask_ = Gt_mask.squeeze(-1)
 
-            if self.datamodule == 'CombinedSparseGraphDataset':
+            if self.datamodule == 'CombinedSparseGraphDataset' or self.datamodule == 'QM9Dataset':
                 original_x, original_h = batch.pos[Gt_mask_], batch.x[Gt_mask_]
             else:
                 original_x, original_h = batch.original_pos, batch.original_x
@@ -563,16 +610,27 @@ class PPBridge(pl.LightningModule):
             # print(Gt_mask_.sum())
             # print(denoised_x[Gt_mask_].size(), original_h.size())
 
-            loss_x_mse = (denoised_x[Gt_mask_] - original_h) ** 2
+            # loss_x_mse = (denoised_x[Gt_mask_] - original_h) ** 2
+            loss_x_ce = F.cross_entropy(denoised_x[Gt_mask_], original_h.argmax(dim=-1), reduction='none').unsqueeze(-1)
             loss_pos_mse = (denoised_pos[Gt_mask_] - original_x) ** 2
-            losses["x_mse"] = mean_flat(loss_x_mse)      
+            # print(denoised_x[Gt_mask_].size(), original_h.argmax(dim=-1).size(), loss_x_ce.size())
+
+            # losses["x_mse"] = mean_flat(loss_x_mse)      
+            losses['x_ce'] = mean_flat(loss_x_ce)
             # losses['pos_mse'] = mean_flat((denoised_pos[Gt_mask_] - original_x) ** 2)
             losses["pos_mse"] = scatter_mean_flat(loss_pos_mse, batch_info[Gt_mask_])
-            losses["weighted_x_mse"] = mean_flat(x_weights[Gt_mask_] * loss_x_mse)
+
+            # losses["weighted_x_mse"] = mean_flat(x_weights[Gt_mask_] * loss_x_mse)
+            # print('loss_x_ce', loss_x_ce.size(), x_weights[Gt_mask_].size())
+            losses['weighted_x_ce'] = mean_flat(x_weights[Gt_mask_] * loss_x_ce)
             # losses["weighted_pos_mse"] = mean_flat(pos_weights[Gt_mask_] * (denoised_pos[Gt_mask_] - original_x) ** 2)
             losses["weighted_pos_mse"] = scatter_mean_flat(pos_weights[Gt_mask_] * loss_pos_mse, batch_info[Gt_mask_])
 
-            losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_mse, dim=-1) + 
+            # losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_mse, dim=-1) + 
+            #                                    torch.sum(pos_weights[Gt_mask_] * loss_pos_mse, dim=-1),
+            #                                    batch_info[Gt_mask_])
+            
+            losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_ce, dim=-1) + 
                                                torch.sum(pos_weights[Gt_mask_] * loss_pos_mse, dim=-1),
                                                batch_info[Gt_mask_])
 

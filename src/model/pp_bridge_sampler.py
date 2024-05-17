@@ -24,31 +24,36 @@ class PPBridgeSampler(PPBridge):
 
     def preprocess(self, xT, hT, node_mask, Gt_mask=None, batch_info=None, device='cuda'):
         node_mask = node_mask.unsqueeze(-1)
-        Gt_mask = Gt_mask.view(node_mask.size(0), node_mask.size(1), -1)
-        if self.bridge_model.datamodule.startswith('Combined'):
-            xT = center2zero_combined_graph(xT, node_mask, Gt_mask)
-            node_mask = node_mask.squeeze(-1)
+        Gt_mask_ = Gt_mask.view(node_mask.size(0), node_mask.size(1), -1)
+        if self.bridge_model.datamodule.startswith('Combined') or self.bridge_model.datamodule == 'QM9Dataset':
+            xT = center2zero_combined_graph(xT, node_mask, Gt_mask_)
+            if self.bridge_model.datamodule == 'CombinedGraphDataset':
+                node_mask = node_mask.squeeze(-1)
 
-            bs = xT.size(0)
-            xT_, hT_ = [], []
-            sparse_Gt_mask = []
-            batch_all = []
+                bs = xT.size(0)
+                xT_, hT_ = [], []
+                sparse_Gt_mask = []
+                batch_all = []
 
-            for batch_idx in range(bs):
-                xT_.append(xT[batch_idx][node_mask[batch_idx]])
-                hT_.append(hT[batch_idx][node_mask[batch_idx]])
-                N = node_mask[batch_idx].sum().item()    # 2 x number of nodes
-                # print('number of nodes in the current graph', N)
-                Gt_mask_batch = torch.zeros(N, device=device)
-                # print(Gt_mask_batch.size(), Gt_mask_batch)
-                Gt_mask_batch[:(N//2)] = 1
-                Gt_mask_batch = Gt_mask_batch.bool()
-                sparse_Gt_mask.append(Gt_mask_batch)
-                batch_all.append(torch.ones(N, device=device, dtype=torch.long) * batch_idx)
-            xT = torch.cat(xT_, dim=0)
-            hT = torch.cat(hT_, dim=0)
-            Gt_mask = torch.cat(sparse_Gt_mask, dim=0)
-            batch_info = torch.cat(batch_all, dim=0)
+                for batch_idx in range(bs):
+                    xT_.append(xT[batch_idx][node_mask[batch_idx]])
+                    hT_.append(hT[batch_idx][node_mask[batch_idx]])
+                    N = node_mask[batch_idx].sum().item()    # 2 x number of nodes
+                    # print('number of nodes in the current graph', N)
+                    Gt_mask_batch = torch.zeros(N, device=device)
+                    # print(Gt_mask_batch.size(), Gt_mask_batch)
+                    Gt_mask_batch[:(N//2)] = 1
+                    Gt_mask_batch = Gt_mask_batch.bool()
+                    sparse_Gt_mask.append(Gt_mask_batch)
+                    batch_all.append(torch.ones(N, device=device, dtype=torch.long) * batch_idx)
+                xT = torch.cat(xT_, dim=0)
+                hT = torch.cat(hT_, dim=0)
+                Gt_mask = torch.cat(sparse_Gt_mask, dim=0)
+                batch_info = torch.cat(batch_all, dim=0)
+            elif self.bridge_model.datamodule == 'CombinedSparseGraphDataset' or self.bridge_model.datamodule == 'QM9Dataset':
+                xT = xT[0]
+                # Gt_mask = Gt_mask[0]
+                # node_mask = node_mask[0]
 
         else:
             if self.xT_type == 'noise':
@@ -59,7 +64,7 @@ class PPBridgeSampler(PPBridge):
         return xT, hT, Gt_mask, batch_info
 
     def denoiser(self, backbone, sigma, h_t, x_t, h_T, x_T, node_mask=None, edge_mask=None, Gt_mask=None, batch_info=None, clip_denoised=False):
-        if self.bridge_model.datamodule.startswith('Combined'):
+        if self.bridge_model.datamodule.startswith('Combined') or self.bridge_model.datamodule == 'QM9Dataset':
             _, _, denoised_h, denoised_x = self.bridge_model.denoise(backbone, sigma, h_t, x_t, h_T, x_T, Gt_mask=Gt_mask, batch_info=batch_info)
         else:
             _, _, denoised_h, denoised_x = self.bridge_model.denoise(backbone, sigma, h_t, x_t, h_T, x_T, node_mask=node_mask, edge_mask=edge_mask, Gt_mask=Gt_mask, batch_info=batch_info)
