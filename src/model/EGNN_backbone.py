@@ -205,8 +205,8 @@ class EnBaseLayer(nn.Module):
 
         self.node_mlp = MLP(2 * hidden_dim, hidden_dim, hidden_dim, num_layer=2, norm=norm, act_fn=act_fn)
 
-    def forward(self, h, x, edge_index, mask_ligand, edge_attr=None):
-        # print('mask', mask_ligand)
+    def forward(self, h, x, edge_index, Gt_mask, edge_attr=None):
+        # print('mask', Gt_mask)
         src, dst = edge_index
         hi, hj = h[dst], h[src]
         # \phi_e in Eq(3)
@@ -231,8 +231,8 @@ class EnBaseLayer(nn.Module):
         mi = scatter_sum(mij * eij, dst, dim=0, dim_size=h.shape[0])
 
         # h update in Eq(6)
-        h = self.node_mlp(torch.cat([mi, h], -1)) * mask_ligand[:, None] # + h
-        # h = h * mask_ligand
+        h = self.node_mlp(torch.cat([mi, h], -1)) * Gt_mask[:, None] + h # * (~Gt_mask)[:, None]
+        # h = h * Gt_mask
         if self.update_x:
             # x update in Eq(4)
             xi, xj = x[dst], x[src]
@@ -242,10 +242,11 @@ class EnBaseLayer(nn.Module):
             # print('d_sq', d_sq)
             # print('mlp output', self.x_mlp(mij))
             delta_x = scatter_sum((xi - xj) / (torch.sqrt(d_sq + 1e-8) + 1) * self.x_mlp(mij), dst, dim=0)
-            # print(x.size(), delta_x.size(), mask_ligand[:, None].size())
+            # print(x.size(), delta_x.size(), Gt_mask[:, None].size())
             # print(delta_x)
-            x = delta_x * mask_ligand[:, None] + x  # only ligand positions will be updated
-            # x = delta_x * mask_ligand + x  # only ligand positions will be updated
+            x = delta_x * Gt_mask[:, None] + x  # only Gt positions will be updated
+            # x = delta_x * Gt_mask + x  # only Gt positions will be updated
+            # x = x + delta_x
 
         return h, x
 
@@ -268,7 +269,8 @@ class EGNN_combined_graph(nn.Module):
         self.cutoff_mode = cutoff_mode
         self.distance_expansion = GaussianSmearing(stop=cutoff, num_gaussians=num_r_gaussian)
         if self.time_cond:
-            self.embedding = nn.Linear(self.hidden_dim + 1, self.hidden_dim)
+            self.embedding_in = nn.Linear(self.hidden_dim + 1, self.hidden_dim)
+            self.embedding_out = nn.Linear(self.hidden_dim, self.hidden_dim)
         self.net = self._build_network()
 
     def _build_network(self):
@@ -281,7 +283,7 @@ class EGNN_combined_graph(nn.Module):
         return nn.ModuleList(layers)
 
     # todo: refactor
-    def _connect_edge(self, x, mask_ligand, batch, bs, n_node):
+    def _connect_edge(self, x, Gt_mask, batch, bs, n_node):
         # if self.cutoff_mode == 'radius':
         #     edge_index = radius_graph(x, r=self.r, batch=batch, flow='source_to_target')
         # bs, n_node = x.size(0), x.size(1)
@@ -296,20 +298,20 @@ class EGNN_combined_graph(nn.Module):
             # print('edge index', edge_index)
         elif self.cutoff_mode == 'hybrid':
             edge_index = batch_hybrid_edge_connection(
-                x, k=self.k, mask_ligand=mask_ligand, batch=batch, add_p_index=True)
+                x, k=self.k, mask_ligand=Gt_mask, batch=batch, add_p_index=True)
         else:
             raise ValueError(f'Not supported cutoff mode: {self.cutoff_mode}')
         return edge_index
 
     # todo: refactor
     @staticmethod
-    def _build_edge_type(edge_index, mask_ligand):
+    def _build_edge_type(edge_index, Gt_mask):
         # print(edge_index.size())
         src, dst = edge_index
         edge_type = torch.zeros(len(src)).to(edge_index)
-        # print(mask_ligand.size())   
-        n_src = mask_ligand[src] == True # 1
-        n_dst = mask_ligand[dst] == True # 1
+        # print(Gt_mask.size())   
+        n_src = Gt_mask[src] == True # 1
+        n_dst = Gt_mask[dst] == True # 1
         # print(n_src.size(), n_dst.size())
         edge_type[n_src & n_dst] = 0
         edge_type[n_src & ~n_dst] = 1
@@ -318,34 +320,36 @@ class EGNN_combined_graph(nn.Module):
         edge_type = F.one_hot(edge_type, num_classes=4)
         return edge_type
 
-    def forward(self, h, x, t, mask_ligand, batch, return_all=False):
+    def forward(self, h, x, t, Gt_mask, batch, return_all=False):
         # bs, n_node = x.size(0), x.size(1)
         bs = batch.max().item() + 1
         # print('batch size', bs)
         # x = x.view(bs * n_node, -1)
         # h = h.view(bs * n_node, -1)
-        n_node = mask_ligand.sum() * 2    # not used any more
+        n_node = Gt_mask.sum() * 2    # not used any more
         # print('input x:', x)
         # print('input h:', h)
+        h_ = h
 
         if self.time_cond:
             t = t.unsqueeze(1)
             # print(h.size(), t.size())
-            # print(h.device, t.device, mask_ligand.device)
+            # print(h.device, t.device, Gt_mask.device)
             h = torch.cat([h, t], dim=-1)
-            # print(h.device, mask_ligand.device)
-            h = self.embedding(h) * mask_ligand[:, None]
+            # print(h.device, Gt_mask.device)
+            h = self.embedding_in(h) * Gt_mask[:, None] + h_ * (~Gt_mask)[:, None]
         all_x = [x]
         all_h = [h]
         for l_idx, layer in enumerate(self.net):
-            edge_index = self._connect_edge(x, mask_ligand, batch, bs, n_node)
-            edge_type = self._build_edge_type(edge_index, mask_ligand)
-            h, x = layer(h, x, edge_index, mask_ligand, edge_attr=edge_type)
+            edge_index = self._connect_edge(x, Gt_mask, batch, bs, n_node)
+            edge_type = self._build_edge_type(edge_index, Gt_mask)
+            h, x = layer(h, x, edge_index, Gt_mask, edge_attr=edge_type)
             all_x.append(x)
             all_h.append(h)
         # x = x.view(bs, n_node, -1)
         # h = h.view(bs, n_node, -1)
-        h = h * mask_ligand[:, None]
+        h = self.embedding_out(h)
+        h = h * Gt_mask[:, None] + h_ * (~Gt_mask)[:, None]
         h = F.softmax(h, dim=-1)
         outputs = {'x': x, 'h': h}
         if return_all:
