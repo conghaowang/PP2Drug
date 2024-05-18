@@ -271,7 +271,9 @@ class EGNN_combined_graph(nn.Module):
         self.distance_expansion = GaussianSmearing(stop=cutoff, num_gaussians=num_r_gaussian)
         if self.time_cond:
             self.embedding_in = nn.Linear(self.input_dim + 1, self.hidden_dim)
-            self.embedding_out = nn.Linear(self.hidden_dim, self.input_dim)
+        else:
+            self.embedding_in = nn.Linear(self.input_dim, self.hidden_dim)
+        self.embedding_out = nn.Linear(self.hidden_dim, self.input_dim)
         self.net = self._build_network()
 
     def _build_network(self):
@@ -352,8 +354,8 @@ class EGNN_combined_graph(nn.Module):
         h = self.embedding_out(h)
         h = h * Gt_mask[:, None] + h_ * (~Gt_mask)[:, None]
         h = F.softmax(h, dim=-1)
-        outputs = {'x': x, 'h': h}
-        if return_all:
-            outputs.update({'all_x': all_x, 'all_h': all_h})
+        # outputs = {'x': x, 'h': h}
+        # if return_all:
+        #     outputs.update({'all_x': all_x, 'all_h': all_h})
         # return outputs
         return h, x
