@@ -78,17 +78,31 @@ def center2zero_with_mask(x, node_mask, check_mask=True):
     N = node_mask.sum(1, keepdims=True)
 
     mean = torch.sum(x_, dim=1, keepdim=True) / N
+    print(mean)
+    assert mean.size(-1) == 3 
     x_ = x_ - mean * node_mask
     return x_
 
 
-def center2zero_combined_graph(x, node_mask, Gt_mask, mode='g1'):
+def center2zero_combined_graph(x, node_mask, Gt_mask, mode='individual'):
     GT_mask = node_mask & (~Gt_mask)
     # print(node_mask.size(), Gt_mask.size(), GT_mask.size())
     x_ = x.detach().clone()
     xt_ = center2zero_with_mask(x_, Gt_mask, check_mask=False)
     xT_ = center2zero_with_mask(x_, GT_mask, check_mask=False)
     return xt_*Gt_mask + xT_*GT_mask
+
+
+def center2zero_sparse_graph(x, Gt_mask, batch_info, mode='GT'):
+    if mode == 'GT':
+        mean = scatter_mean(x[Gt_mask], batch_info[Gt_mask], dim=0)
+        assert mean.size(-1) == 3
+        x = x - mean[batch_info]
+        return x
+    elif mode == 'individual':
+        raise NotImplementedError
+    else:
+        raise NotImplementedError
 
 
 def sample_zero_center_gaussian(size, device):

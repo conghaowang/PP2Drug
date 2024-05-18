@@ -7,7 +7,7 @@ from functools import partial
 import sys
 sys.path.append('../model')
 from pp_bridge import PPBridge
-from model.utils.utils_diffusion import append_dims, append_zero, center2zero_combined_graph, center2zero_with_mask
+from model.utils.utils_diffusion import append_dims, append_zero, center2zero_combined_graph, center2zero_sparse_graph, center2zero_with_mask, sample_zero_center_gaussian
 
 
 class PPBridgeSampler(PPBridge):
@@ -26,8 +26,8 @@ class PPBridgeSampler(PPBridge):
         node_mask = node_mask.unsqueeze(-1)
         Gt_mask_ = Gt_mask.view(node_mask.size(0), node_mask.size(1), -1)
         if self.bridge_model.datamodule.startswith('Combined') or self.bridge_model.datamodule == 'QM9Dataset':
-            xT = center2zero_combined_graph(xT, node_mask, Gt_mask_)
             if self.bridge_model.datamodule == 'CombinedGraphDataset':
+                xT = center2zero_combined_graph(xT, node_mask, Gt_mask_)
                 node_mask = node_mask.squeeze(-1)
 
                 bs = xT.size(0)
@@ -51,9 +51,47 @@ class PPBridgeSampler(PPBridge):
                 Gt_mask = torch.cat(sparse_Gt_mask, dim=0)
                 batch_info = torch.cat(batch_all, dim=0)
             elif self.bridge_model.datamodule == 'CombinedSparseGraphDataset' or self.bridge_model.datamodule == 'QM9Dataset':
-                xT = xT[0]
-                # Gt_mask = Gt_mask[0]
-                # node_mask = node_mask[0]
+                Gt_mask = Gt_mask_[0].squeeze(-1)
+                node_mask = node_mask[0]
+                xT = center2zero_sparse_graph(xT, Gt_mask, batch_info)
+
+                if self.xT_type == 'noise':
+                    # xT = xT[0]  # (1, N, 3) => (N, 3)
+                    # hT = hT[0]  # (1, N, h) => (N, h)
+                    bs = torch.max(batch_info).item() + 1
+
+                    x0_, xT_, h0_, hT_ = [], [], [], []
+                    for i in range(bs):
+                        batch_idx = (batch_info == i)
+                        # x0_batch = x0[batch_idx]
+                        xT_batch = xT[batch_idx]
+                        # h0_batch = h0[batch_idx]
+                        hT_batch = hT[batch_idx]
+                        Gt_mask_batch = Gt_mask[batch_idx].squeeze(-1)
+                        # print(x0_batch.size(), h0_batch.size(), Gt_mask_batch.size())
+
+                        # directly change x0 and h0, and rebuild xT and hT
+                        # x0_Gt = x0_batch[Gt_mask_batch]
+                        # x0_noise = torch.randn_like(x0_Gt, device=x0.device)
+                        xT_noise = sample_zero_center_gaussian(xT_batch[Gt_mask_batch].size(), device=xT.device)
+                        # x0_noise = xT_batch[~Gt_mask_batch]
+                        # x0_batch_ = torch.cat([x0_Gt, x0_noise], dim=0)
+                        xT_batch_ = torch.cat([xT_noise, xT_noise], dim=0)
+                        # x0_.append(x0_batch_)
+                        xT_.append(xT_batch_)
+                        xT[batch_idx][~Gt_mask_batch] = xT_noise
+
+                        # h0_Gt = h0_batch[Gt_mask_batch]
+                        hT_noise = torch.randn_like(hT_batch[Gt_mask_batch], device=hT.device)
+                        # h0_noise = hT_batch[~Gt_mask_batch]
+                        # h0_batch_ = torch.cat([h0_Gt, h0_noise], dim=0)
+                        hT_batch_ = torch.cat([hT_noise, hT_noise], dim=0)
+                        # h0_.append(h0_batch_)
+                        hT_.append(hT_batch_)
+                        hT[batch_idx][~Gt_mask_batch] = hT_noise
+
+                    xT = torch.cat(xT_, dim=0)
+                    hT = torch.cat(hT_, dim=0)
 
         else:
             if self.xT_type == 'noise':
@@ -289,6 +327,7 @@ class PPBridgeSampler(PPBridge):
                 # 1 step euler
                 sigma_hat = (sigmas[i+1] - sigmas[i]) * churn_step_ratio + sigmas[i]
                 
+                # print(x.size(), x_T.size())
                 denoised_h, denoised_x = denoiser(self.bridge_model.backbone, sigmas[i] * s_in, h, x, h_T, x_T, node_mask=node_mask, Gt_mask=Gt_mask, batch_info=batch_info)
                 # print('denoised_h:', denoised_h)
                 # print('denoised_x:', denoised_x)
@@ -312,7 +351,8 @@ class PPBridgeSampler(PPBridge):
             
             # heun step
             # print('current h:', h)
-            # print('current x:', x)
+            # print('current x:', x.size())
+            # print('xT:', x_T.size())
             # print(h.device, sigma_hat.device, s_in.device, x.device, h.device, h_T.device, x_T.device, node_mask.device, Gt_mask.device, batch_info.device)
             denoised_h, denoised_x = denoiser(self.bridge_model.backbone, sigma_hat * s_in, h, x, h_T, x_T, node_mask=node_mask, Gt_mask=Gt_mask, batch_info=batch_info)
             if bridge_type == 've':

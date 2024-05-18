@@ -13,7 +13,7 @@ sys.path.append('..')
 from model.EGNN_backbone import EGNN, EGNN_combined_graph
 from model.SE3_transformer_backbone import SE3Transformer
 from model.utils.time_scheduler import UniformSampler, RealUniformSampler
-from model.utils.utils_diffusion import append_dims, vp_logs, vp_logsnr, mean_flat, scatter_mean_flat, scatter_flat, center2zero, center2zero_with_mask, center2zero_combined_graph, sample_zero_center_gaussian, sample_zero_center_gaussian_with_mask
+from model.utils.utils_diffusion import append_dims, vp_logs, vp_logsnr, mean_flat, scatter_mean_flat, scatter_flat, center2zero, center2zero_with_mask, center2zero_combined_graph, center2zero_sparse_graph, sample_zero_center_gaussian, sample_zero_center_gaussian_with_mask
 from script_utils import instantiate_from_config
 
 class PPBridge(pl.LightningModule):
@@ -123,8 +123,9 @@ class PPBridge(pl.LightningModule):
             self.backbone = SE3Transformer(
                 num_blocks=backbone_config['num_blocks'],
                 num_layers=backbone_config['num_layers'],
-                hidden_dim=backbone_config['hidden_dim'],
-                n_heads=backbone_config['n_heads'],
+                input_dim=backbone_config['feature_size'],
+                hidden_dim=backbone_config['hidden_size'],
+                n_heads=backbone_config['num_heads'],
                 k=backbone_config['knn'],
                 edge_feat_dim=4,
                 num_r_gaussian=backbone_config['num_r_gaussian'],
@@ -137,7 +138,8 @@ class PPBridge(pl.LightningModule):
                 num_h2x=backbone_config['num_h2x'],
                 r_max=backbone_config['r_max'],
                 x2h_out_fc=backbone_config['x2h_out_fc'],
-                sync_twoup=backbone_config['sync_twoup']
+                sync_twoup=backbone_config['sync_twoup'],
+                time_cond=backbone_config['time_cond'],
             )
         else:
             raise NotImplementedError(f"Backbone type {backbone_config['type']} not implemented")
@@ -214,10 +216,10 @@ class PPBridge(pl.LightningModule):
 
             # xT is already included in x0
             # print(x0.size(), node_mask.size(), Gt_mask.size())
-            x0 = center2zero_combined_graph(x0, node_mask, Gt_mask)
             # xT = xT
 
             if self.datamodule == 'CombinedGraphDataset':
+                x0 = center2zero_combined_graph(x0, node_mask, Gt_mask)
                 # convert the dense graphs into sparse ones
 
                 # x0_ = x0.view(x0.size(0) * x0.size(1), -1)
@@ -296,9 +298,10 @@ class PPBridge(pl.LightningModule):
             elif self.datamodule == 'CombinedSparseGraphDataset' or self.datamodule == 'QM9Dataset':
                 # data is already in sparse format
                 
-                x0 = x0[0]
+                # x0 = x0[0]
                 Gt_mask = Gt_mask[0]
                 node_mask = node_mask[0]
+                x0 = center2zero_sparse_graph(x0, Gt_mask.squeeze(-1), batch_info)
 
                 if self.xT_type == 'noise':
                     # xT = xT[0]  # (1, N, 3) => (N, 3)
