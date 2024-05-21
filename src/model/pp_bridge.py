@@ -534,11 +534,12 @@ class PPBridge(pl.LightningModule):
         return output_h, output_x, denoised_h, denoised_x   # denoised is the output of the D_theta (the predicted x0^hat)
 
     def sample_noise(self, h_start, x_start, mask=None):
+        noise_h = torch.randn_like(h_start, device=self.device)
         if self.datamodule.startswith('Combined') or self.datamodule == 'QM9Dataset':  # features are in sparse representations (dim is 2)
-            noise_h = sample_zero_center_gaussian(h_start.size(), self.device)
+            # noise_h = sample_zero_center_gaussian(h_start.size(), self.device)
             noise_x = sample_zero_center_gaussian(x_start.size(), self.device)
         else:
-            noise_h = sample_zero_center_gaussian_with_mask(h_start.size(), self.device, mask)
+            # noise_h = sample_zero_center_gaussian_with_mask(h_start.size(), self.device, mask)
             noise_x = sample_zero_center_gaussian_with_mask(x_start.size(), self.device, mask)
 
         return noise_h, noise_x
@@ -625,39 +626,46 @@ class PPBridge(pl.LightningModule):
             Gt_mask_ = Gt_mask.squeeze(-1)
 
             if self.datamodule == 'CombinedSparseGraphDataset' or self.datamodule == 'QM9Dataset':
-                original_x, original_h = batch.pos[Gt_mask_], batch.x[Gt_mask_]
+                # center the original x to zero
+                # original_x, original_h = batch.pos[Gt_mask_], batch.x[Gt_mask_]
+                # original_x = center2zero(original_x, mean_dim=0)
+
+                # center to zero by the pp graph center
+                original_x, original_h = x_start[Gt_mask_], h_start[Gt_mask_]
             else:
-                original_x, original_h = batch.original_pos, batch.original_x
-            original_x = center2zero(original_x)
+                # original_x, original_h = batch.original_pos, batch.original_x
+                # original_x = center2zero(original_x, mean_dim=1)
+
+                original_x, original_h = x_start[Gt_mask_], h_start[Gt_mask_]
             # Gt_mask = batch.Gt_mask
             # Gt_mask_ = Gt_mask.view(h_start.size(0), h_start.size(1))
             
             # print(Gt_mask_.sum())
             # print(denoised_x[Gt_mask_].size(), original_h.size())
 
-            # loss_x_mse = (denoised_x[Gt_mask_] - original_h) ** 2
-            loss_x_ce = F.cross_entropy(denoised_x[Gt_mask_], original_h.argmax(dim=-1), reduction='none').unsqueeze(-1)
+            loss_x_mse = (denoised_x[Gt_mask_] - original_h) ** 2
+            # loss_x_ce = F.cross_entropy(denoised_x[Gt_mask_], original_h.argmax(dim=-1), reduction='none').unsqueeze(-1)
             loss_pos_mse = (denoised_pos[Gt_mask_] - original_x) ** 2
             # print(denoised_x[Gt_mask_].size(), original_h.argmax(dim=-1).size(), loss_x_ce.size())
 
-            # losses["x_mse"] = mean_flat(loss_x_mse)      
-            losses['x_ce'] = mean_flat(loss_x_ce)
+            losses["x_mse"] = mean_flat(loss_x_mse)      
+            # losses['x_ce'] = mean_flat(loss_x_ce)
             # losses['pos_mse'] = mean_flat((denoised_pos[Gt_mask_] - original_x) ** 2)
             losses["pos_mse"] = scatter_mean_flat(loss_pos_mse, batch_info[Gt_mask_])
 
-            # losses["weighted_x_mse"] = mean_flat(x_weights[Gt_mask_] * loss_x_mse)
+            losses["weighted_x_mse"] = mean_flat(x_weights[Gt_mask_] * loss_x_mse)
             # print('loss_x_ce', loss_x_ce.size(), x_weights[Gt_mask_].size())
-            losses['weighted_x_ce'] = mean_flat(x_weights[Gt_mask_] * loss_x_ce)
+            # losses['weighted_x_ce'] = mean_flat(x_weights[Gt_mask_] * loss_x_ce)
             # losses["weighted_pos_mse"] = mean_flat(pos_weights[Gt_mask_] * (denoised_pos[Gt_mask_] - original_x) ** 2)
             losses["weighted_pos_mse"] = scatter_mean_flat(pos_weights[Gt_mask_] * loss_pos_mse, batch_info[Gt_mask_])
 
-            # losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_mse, dim=-1) + 
-            #                                    torch.sum(pos_weights[Gt_mask_] * loss_pos_mse, dim=-1),
-            #                                    batch_info[Gt_mask_])
-            
-            losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_ce, dim=-1) + 
+            losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_mse, dim=-1) + 
                                                torch.sum(pos_weights[Gt_mask_] * loss_pos_mse, dim=-1),
                                                batch_info[Gt_mask_])
+            
+            # losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_ce, dim=-1) + 
+            #                                    torch.sum(pos_weights[Gt_mask_] * loss_pos_mse, dim=-1),
+            #                                    batch_info[Gt_mask_])
 
         else:
             losses["x_mse"] = mean_flat((denoised_x - h_start) ** 2)      # x should be the atom type one hot encoding, think twice of mse loss

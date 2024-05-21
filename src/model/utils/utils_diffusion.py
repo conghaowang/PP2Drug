@@ -49,10 +49,11 @@ def scatter_flat(tensor, batch):
     return loss
 
 
-def center2zero(x):
+def center2zero(x, mean_dim=0):
     if x == None:
         return None
-    mean = torch.mean(x, dim=1, keepdim=True)
+    mean = torch.mean(x, dim=mean_dim, keepdim=True)
+    assert mean.size(-1) == 3
     x = x - mean
     return x
 
