@@ -341,7 +341,7 @@ class SE3Transformer(nn.Module):
             all_h.append(h)
 
         h = self.embedding_out(h)
-        h = h * Gt_mask[:, None] + h_ * (~Gt_mask)[:, None]
+        h = h * Gt_mask[:, None] + h_ * (~Gt_mask)[:, None]     # w/o GT should not matter, since loss is computed on Gt part only
         h = F.softmax(h, dim=-1)
         # outputs = {'x': x, 'h': h}
         # if return_all:
