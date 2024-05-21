@@ -18,15 +18,18 @@ from model.pp_bridge_sampler import PPBridgeSampler
 from script_utils import load_data, load_qm9_data
 
 
-def reconstruct(x, h, Gt_mask, batch_info, ligand_names, save_path, datamodule='QM9Dataset'):
+@torch.no_grad()
+def reconstruct(x, h, Gt_mask, batch_info, ligand_names, save_path, datamodule='QM9Dataset', softmax_h=True):
     if datamodule == 'QM9Dataset':
         index_to_atom_type_aromatic = {v: k for k, v in MAP_ATOM_TYPE_AROMATIC_TO_INDEX.items()}
     num_graphs = max(batch_info).item() + 1
     success = 0
     for i in tqdm(range(num_graphs)):
-        index_i = batch_info==i
+        index_i = (batch_info == i)
         x_i = x[index_i][Gt_mask[index_i]]
         h_i = h[index_i][Gt_mask[index_i]]
+        if softmax_h:
+            h_i = F.softmax(h_i, dim=-1)
         h_class = torch.argmax(h_i, dim=-1)
         atom_index = h_class.detach().cpu()
         if datamodule == 'QM9Dataset':
