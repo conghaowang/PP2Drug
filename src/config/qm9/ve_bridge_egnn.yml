@@ -11,19 +11,19 @@ model:
     ema_decay: 0.999
     weight_decay: 1e-12
     weight_schedule: 'uniform' # 'uniform'
-    loss_x_weight: 1e+3
+    loss_x_weight: 1e+1
 
   backbone: 
     type: 'EGNN'
     feature_size: 8
     num_layers: 10
-    hidden_size: 512
+    hidden_size: 128
     time_cond: True
-    xT_type: 'noise' # 'noise' # 'none' # 'pp'
+    xT_type: 'pp' # 'noise' # 'none' # 'pp'
     xT_mode: 'concat_graph' # 'concat_graph' # 'none'
 
 training:
-  batch_size: 7000
+  batch_size: 512
   log_interval: 100
   save_interval: 1000
   test_interval: 1000
