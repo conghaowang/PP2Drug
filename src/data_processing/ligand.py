@@ -25,7 +25,8 @@ class Ligand():
         pbmol: pybel.Molecule,
         rdmol: Optional[Chem.Mol] = None,
         atom_positions: Optional[Union[List[NDArray[np.float32]], NDArray[np.float32]]] = None,
-        conformer_axis: Optional[int] = None
+        conformer_axis: Optional[int] = None,
+        filtering: bool = True,
     ):
         """Ligand Object
 
@@ -42,7 +43,7 @@ class Ligand():
                     Using RDKit Conformer informations
         """
         self.pbmol: pybel.Molecule = pbmol.clone
-        # self.pbmol.removeh()
+        self.pbmol.removeh()
         self.obmol: ob.OBMol = self.pbmol.OBMol
         self.obatoms: List[ob.OBAtom] = [self.obmol.GetAtom(i + 1) for i in range(self.obmol.NumAtoms())]
 
@@ -54,7 +55,7 @@ class Ligand():
             #         a.SetNumRadicalElectrons(a.GetNumImplicitHs())
             #         a.SetNoImplicit(True)
             #         a.UpdatePropertyCache()
-            # rdmol = Chem.RemoveAllHs(rdmol)
+            rdmol = Chem.RemoveAllHs(rdmol)
             assert self.num_atoms == rdmol.GetNumAtoms(), f'Atom Number ERROR - openbabel: {self.num_atoms}, rdkit: {rdmol.GetNumAtoms()}'
             for obatom, rdatom in zip(self.obatoms, rdmol.GetAtoms()):
                 assert obatom.GetAtomicNum() == rdatom.GetAtomicNum(), f'Atomic Number ERROR - openbabel: {obatom.GetAtomicNum()}, rdkit: {rdatom.GetAtomicNum()}'
@@ -78,7 +79,8 @@ class Ligand():
         self.pharmacophore_list: List[Tuple[str, PharmacophoreNode]] = []
         for typ, node_list in self.pharmacophore_nodes.items():
             self.pharmacophore_list.extend((typ, node) for node in node_list)
-        self.filter_pharmacophore()
+        if filtering:
+            self.filter_pharmacophore()
 
         self.graph = LigandGraph(self)
 
