@@ -19,7 +19,7 @@ from script_utils import load_data, load_qm9_data
 
 
 @torch.no_grad()
-def reconstruct(x, h, Gt_mask, batch_info, ligand_names, save_path, datamodule='QM9Dataset', softmax_h=True):
+def reconstruct(x, h, Gt_mask, batch_info, ligand_names, mol_save_path, datamodule='QM9Dataset', softmax_h=True, remove_H=False, basic_mode=False):
     if datamodule == 'QM9Dataset':
         index_to_atom_type_aromatic = {v: k for k, v in MAP_ATOM_TYPE_AROMATIC_TO_INDEX.items()}
     num_graphs = max(batch_info).item() + 1
@@ -30,6 +30,8 @@ def reconstruct(x, h, Gt_mask, batch_info, ligand_names, save_path, datamodule='
         h_i = h[index_i][Gt_mask[index_i]]
         if softmax_h:
             h_i = F.softmax(h_i, dim=-1)
+        if remove_H:
+            h_i = h_i[:, :-1]
         h_class = torch.argmax(h_i, dim=-1)
         atom_index = h_class.detach().cpu()
         if datamodule == 'QM9Dataset':
@@ -40,9 +42,9 @@ def reconstruct(x, h, Gt_mask, batch_info, ligand_names, save_path, datamodule='
             atom_aromatic = is_aromatic_from_index(atom_index)
         pos = x_i.detach().cpu().tolist()
         try:
-            mol = reconstruct_from_generated(pos, atom_type, atom_aromatic, basic_mode=False)
+            mol = reconstruct_from_generated(pos, atom_type, atom_aromatic, basic_mode=basic_mode)
             mol_name = ligand_names[i]
-            with Chem.SDWriter(os.path.join(save_path, 'reconstructed_mols', mol_name + '.sdf')) as w:
+            with Chem.SDWriter(os.path.join(mol_save_path, mol_name + '.sdf')) as w:
                 w.write(mol)
             success += 1
         except:
@@ -51,11 +53,15 @@ def reconstruct(x, h, Gt_mask, batch_info, ligand_names, save_path, datamodule='
     return success
 
 
-def sample(config_file, ckpt_path, save_path, steps=40, device='cuda:0'):
+def sample(config_file, ckpt_path, save_path, steps=40, device='cuda:0', remove_H=False, basic_mode=False):
     config = OmegaConf.load(config_file)
     # save_path = os.path.join(save_path, config.model.denoiser.bridge_type)
     os.makedirs(save_path, exist_ok=True)
-    os.makedirs(os.path.join(save_path, 'reconstructed_mols/'), exist_ok=True)
+    if not basic_mode:
+        rec_mol_path = os.path.join(save_path, 'reconstructed_mols_aromatic_mode')
+    else:
+        rec_mol_path = os.path.join(save_path, 'reconstructed_mols')
+    os.makedirs(rec_mol_path, exist_ok=True)
     sampler = PPBridgeSampler(config, ckpt_path, device)
 
     dataset_root_path = config.data.root # '/data/conghao001/pharmacophore2drug/PP2Drug/data/small_dataset' # config.data.root
@@ -80,7 +86,7 @@ def sample(config_file, ckpt_path, save_path, steps=40, device='cuda:0'):
             _, _, Gt_mask, batch_info = sampler.preprocess(batch.target_pos, batch.target_x, node_mask=node_mask, Gt_mask=batch.Gt_mask, batch_info=batch.batch, device=device)  # Gt_mask and batch_info are for reconstruction
             x, x_traj, h, h_traj, nfe = sampler.sample(batch.target_pos, batch.target_x, steps, node_mask=node_mask, Gt_mask=batch.Gt_mask, batch_info=batch.batch, 
                                                        sigma_min=config.model.denoiser.sigma_min, sigma_max=config.model.denoiser.sigma_max, churn_step_ratio=0.33, device=device)
-        success += reconstruct(x, h, Gt_mask, batch.batch, batch.ligand_name, save_path, datamodule)
+        success += reconstruct(x, h, Gt_mask, batch.batch, batch.ligand_name, rec_mol_path, datamodule, remove_H=remove_H, basic_mode=basic_mode)
         all_x.append(x)
         all_x_traj.append(x_traj)
         all_h.append(h)
@@ -105,7 +111,9 @@ if __name__ == '__main__':
     parser.add_argument('--save', '-s', type=str, default='../generation_results', help='Path to save the reconstructed molecules')
     parser.add_argument('--steps', type=int, default=500, help='Number of steps for sampling')
     parser.add_argument('--gpu', '-g', type=int, default=0, help='Which GPU to use')
+    parser.add_argument('--remove_H', '-r', action='store_true', help='Whether to remove Hydrogens in the reconstruction')
+    parser.add_argument('--basic_mode', '-b', action='store_true', help='Whether to use the basic mode for reconstruction, dont add this if you want to consider aromaticity')
     args = parser.parse_args()
 
     device = torch.device(f'cuda:{int(args.gpu)}' if torch.cuda.is_available() else 'cpu')
-    sample(args.config, args.ckpt, args.save, int(args.steps), device)
+    sample(args.config, args.ckpt, args.save, int(args.steps), device, remove_H=args.remove_H, basic_mode=args.basic_mode)
