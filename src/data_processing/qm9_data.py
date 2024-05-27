@@ -16,16 +16,27 @@ from data_processing.utils import PP_TYPE_MAPPING, ATOM_FAMILIES
 from data_processing.paired_data import PharmacophoreDataset, CombinedSparseGraphDataset, load_dataset
 
 # QM9 dataset contains less types of atoms than the cross-docked dataset
-ATOM_TYPE_MAPPING = {'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4}
+# ATOM_TYPE_MAPPING = {'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4}
+# MAP_ATOM_TYPE_AROMATIC_TO_INDEX = {
+#     (1, False): 0,  # H
+#     (6, False): 1,  # C
+#     (6, True): 2,   # C.ar
+#     (7, False): 3,  # N
+#     (7, True): 4,   # N.ar
+#     (8, False): 5,  # O
+#     (8, True): 6,   # O.ar
+#     (9, False): 7,  # F
+# }
+
+ATOM_TYPE_MAPPING = {'C': 1, 'N': 2, 'O': 3, 'F': 4}
 MAP_ATOM_TYPE_AROMATIC_TO_INDEX = {
-    (1, False): 0,  # H
-    (6, False): 1,  # C
-    (6, True): 2,   # C.ar
-    (7, False): 3,  # N
-    (7, True): 4,   # N.ar
-    (8, False): 5,  # O
-    (8, True): 6,   # O.ar
-    (9, False): 7,  # F
+    (6, False): 0, # C
+    (6, True): 1,  # C.ar
+    (7, False): 2, # N
+    (7, True): 3,  # N.ar
+    (8, False): 4, # O
+    (8, True): 5,  # O.ar
+    (9, False): 6  # F
 }
 
 class QM9Dataset(CombinedSparseGraphDataset):
@@ -69,7 +80,7 @@ class QM9Dataset(CombinedSparseGraphDataset):
         with open(self.raw_paths[2], 'r') as f:
             skip = [int(x.split()[0]) - 1 for x in f.read().split('\n')[9:-2]]
 
-        suppl = Chem.SDMolSupplier(self.raw_paths[0], removeHs=False)
+        suppl = Chem.SDMolSupplier(self.raw_paths[0], removeHs=False, sanitize=True)
         pbmols = list(pybel.readfile("sdf", self.raw_paths[0]))
         
         data_list = []
@@ -87,6 +98,7 @@ class QM9Dataset(CombinedSparseGraphDataset):
             smiles = Chem.MolToSmiles(rdmol)
             pbmol = pbmols[i]
             try:
+                rdmol = Chem.AddHs(rdmol)
                 ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None)
             except Exception as e:
                 print(smiles, 'Ligand init failed')
@@ -111,18 +123,18 @@ class QM9Dataset(CombinedSparseGraphDataset):
             target_x, target_pos, node_pp_index = self.compute_target(x, pos, pp_atom_indices, pp_positions, pp_types, pp_index, CoM_tensor)
             if len(pp_info[smiles].keys()) == 0:
                 pp_info[smiles].update({
-                    'pp_atom_indices': pp_atom_indices,
-                    'pp_positions': pp_positions,
-                    'pp_types': pp_types,
-                    'pp_index': pp_index,
-                    'node_pp_index': node_pp_index
+                    'pp_atom_indices': [pp_atom_indices],
+                    'pp_positions': [pp_positions],
+                    'pp_types': [pp_types],
+                    'pp_index': [pp_index],
+                    'node_pp_index': [node_pp_index]
                 })
             else:
-                pp_info[smiles]['pp_atom_indices'] = [pp_info[smiles]['pp_atom_indices'], pp_atom_indices]
-                pp_info[smiles]['pp_positions'] = [pp_info[smiles]['pp_positions'], pp_positions]
-                pp_info[smiles]['pp_types'] = [pp_info[smiles]['pp_types'], pp_types]
-                pp_info[smiles]['pp_index'] = [pp_info[smiles]['pp_index'], pp_index]
-                pp_info[smiles]['node_pp_index'] = [pp_info[smiles]['node_pp_index'], node_pp_index]
+                pp_info[smiles]['pp_atom_indices'].append(pp_atom_indices)
+                pp_info[smiles]['pp_positions'].append(pp_positions)
+                pp_info[smiles]['pp_types'].append(pp_types)
+                pp_info[smiles]['pp_index'].append(pp_index)
+                pp_info[smiles]['node_pp_index'].append(node_pp_index)
             x_ctr, pos_ctr, Gt_mask = self.combine_target(x, pos, target_x, target_pos)
             target_x_ctr, target_pos_ctr, _ = self.combine_target(target_x, target_pos, target_x, target_pos)
             edge_mask_ctr = self.make_edge_mask(num_nodes * 2)
