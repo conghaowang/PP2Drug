@@ -157,9 +157,19 @@ class PharmacophoreDataset(InMemoryDataset):
         print('The maximum number of atoms in the dataset is:', max_N)
         return max_N
 
-    def save_pp_info(self, pp_info):
+    def save_pp_info(self, pp_info, split='all'):
+        if split == 'train':
+            filename = 'train_pp_info.pkl'
+        elif split == 'valid':
+            filename = 'valid_pp_info.pkl'
+        elif split == 'test':
+            filename = 'test_pp_info.pkl'
+        elif split == 'all':
+            filename = 'pp_info.pkl'
+        else:
+            raise ValueError('split must be "train" or "test" or "all"')
         os.makedirs(os.path.join(self.root, 'metadata'), exist_ok=True)
-        with open(os.path.join(self.root, 'metadata', 'pp_info.pkl'), 'wb') as f:
+        with open(os.path.join(self.root, 'metadata', filename), 'wb') as f:
             pickle.dump(pp_info, f)
 
     def process(self):
@@ -572,7 +582,7 @@ if __name__ == '__main__':
 
     module = CombinedSparseGraphDataset # CombinedGraphDataset # PharmacophoreDataset
     root = '../../data/cleaned_crossdocked_data'
-    train_dataset = load_dataset(module, root, split='train')
+    # train_dataset = load_dataset(module, root, split='train')
     valid_dataset = load_dataset(module, root, split='valid')
     test_dataset = load_dataset(module, root, split='test')
 
