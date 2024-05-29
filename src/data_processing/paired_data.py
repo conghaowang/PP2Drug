@@ -550,7 +550,7 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
         #     print(data)
         self.save(data_list, self.processed_paths[0])
         # self.save()
-        self.save_pp_info(pp_info)
+        self.save_pp_info(pp_info, self._split)
 
     def combine_target(self, x, pos, target_x, target_pos):
         N = x.size(0)
