@@ -59,8 +59,10 @@ def sample(config_file, ckpt_path, save_path, steps=40, device='cuda:0', remove_
     os.makedirs(save_path, exist_ok=True)
     if not basic_mode:
         rec_mol_path = os.path.join(save_path, 'reconstructed_mols_aromatic_mode')
+        gen_res_file = os.path.join(save_path, 'generation_res_aromatic_mode.pkl')
     else:
         rec_mol_path = os.path.join(save_path, 'reconstructed_mols')
+        gen_res_file = os.path.join(save_path, 'generation_res.pkl')
     os.makedirs(rec_mol_path, exist_ok=True)
     sampler = PPBridgeSampler(config, ckpt_path, device)
 
@@ -92,7 +94,7 @@ def sample(config_file, ckpt_path, save_path, steps=40, device='cuda:0', remove_
         all_h.append(h)
         all_h_traj.append(h_traj)
         all_nfe.append(nfe)
-    with open(os.path.join(save_path, 'generation_res.pkl'), 'wb') as f:
+    with open(gen_res_file, 'wb') as f:
         pickle.dump({
             'x': all_x,
             'x_traj': all_x_traj,
