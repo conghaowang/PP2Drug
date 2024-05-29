@@ -19,11 +19,11 @@ model:
     num_layers: 10
     hidden_size: 128
     time_cond: True # False
-    xT_type: 'pp' # 'noise' # 'none' # 'pp'
+    xT_type: 'noise' # 'noise' # 'none' # 'pp'
     xT_mode: 'concat_graph' # 'concat_graph' # 'none'
 
 training:
-  batch_size: 512
+  batch_size: 128
   log_interval: 100
   save_interval: 1000
   test_interval: 1000
