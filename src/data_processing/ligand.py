@@ -59,6 +59,7 @@ class Ligand():
             assert self.num_atoms == rdmol.GetNumAtoms(), f'Atom Number ERROR - openbabel: {self.num_atoms}, rdkit: {rdmol.GetNumAtoms()}'
             for obatom, rdatom in zip(self.obatoms, rdmol.GetAtoms()):
                 assert obatom.GetAtomicNum() == rdatom.GetAtomicNum(), f'Atomic Number ERROR - openbabel: {obatom.GetAtomicNum()}, rdkit: {rdatom.GetAtomicNum()}'
+            self.rdmol_noH = rdmol
 
         self.atom_positions: NDArray[np.float32]    # [N_atoms, N_conformers, 3]
         if isinstance(atom_positions, list):

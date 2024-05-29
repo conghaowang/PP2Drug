@@ -158,6 +158,7 @@ class PharmacophoreDataset(InMemoryDataset):
         return max_N
 
     def save_pp_info(self, pp_info):
+        os.makedirs(os.path.join(self.root, 'metadata'), exist_ok=True)
         with open(os.path.join(self.root, 'metadata', 'pp_info.pkl'), 'wb') as f:
             pickle.dump(pp_info, f)
 
@@ -474,22 +475,31 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
         # print(self.raw_paths)
         # max_N = self.get_max_N()
         # max_N = self._max_N
+        pp_info = defaultdict(dict)
         for raw_path in tqdm(self.raw_paths):
             filename = raw_path.split('/')[-1].split('.')[0]
             # print(raw_path)
-            rdmol = Chem.MolFromMolFile(raw_path, sanitize=False)
+            rdmol = Chem.MolFromMolFile(raw_path, removeHs=False, sanitize=True)
             pbmol = next(pybel.readfile("sdf", raw_path))
+            # rdmol = Chem.AddHs(rdmol)
             try:
+                rdmol = Chem.AddHs(rdmol)
                 ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None)
+                rdmol = ligand.rdmol_noH
             except Exception as e:
-                print(raw_path, 'Ligand init failed')
+                print(f'Ligand {raw_path} init failed')
                 print(e)
                 continue
+            # print('Ligand init success')
+            # for atom in rdmol.GetAtoms():
+            #     print(atom.GetSymbol())
+
             num_feat_class = max(len(PP_TYPE_MAPPING.keys()), len(MAP_ATOM_TYPE_AROMATIC_TO_INDEX.keys()))
             try:
                 _, x, atomic_numbers, pos, num_nodes = self.extract_atom_features(rdmol, num_feat_class)
                 # edge_mask = self.make_edge_mask(num_nodes)
-            except KeyError:  # some elements are not considered, skip such ligands
+            except KeyError as e:  # some elements are not considered, skip such ligands
+                print(f'Ligand {raw_path} contains rare elements: {e}')
                 continue
             try:
                 pp_atom_indices, pp_positions, pp_types, pp_index = self.extract_pp(ligand, num_feat_class)
@@ -502,6 +512,20 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
             CoM_tensor = self.compute_CoM(pos, atomic_numbers)
 
             target_x, target_pos, node_pp_index = self.compute_target(x, pos, pp_atom_indices, pp_positions, pp_types, pp_index, CoM_tensor)
+            if len(pp_info[filename].keys()) == 0:
+                pp_info[filename].update({
+                    'pp_atom_indices': [pp_atom_indices],
+                    'pp_positions': [pp_positions],
+                    'pp_types': [pp_types],
+                    'pp_index': [pp_index],
+                    'node_pp_index': [node_pp_index]
+                })
+            else:
+                pp_info[filename]['pp_atom_indices'].append(pp_atom_indices)
+                pp_info[filename]['pp_positions'].append(pp_positions)
+                pp_info[filename]['pp_types'].append(pp_types)
+                pp_info[filename]['pp_index'].append(pp_index)
+                pp_info[filename]['node_pp_index'].append(node_pp_index)
             x_ctr, pos_ctr, Gt_mask = self.combine_target(x, pos, target_x, target_pos)
             target_x_ctr, target_pos_ctr, _ = self.combine_target(target_x, target_pos, target_x, target_pos)
             edge_mask_ctr = self.make_edge_mask(num_nodes * 2)
@@ -516,6 +540,7 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
         #     print(data)
         self.save(data_list, self.processed_paths[0])
         # self.save()
+        self.save_pp_info(pp_info)
 
     def combine_target(self, x, pos, target_x, target_pos):
         N = x.size(0)
@@ -547,7 +572,10 @@ if __name__ == '__main__':
 
     module = CombinedSparseGraphDataset # CombinedGraphDataset # PharmacophoreDataset
     root = '../../data/cleaned_crossdocked_data'
-    # root = '../../data/small_dataset'
     train_dataset = load_dataset(module, root, split='train')
     valid_dataset = load_dataset(module, root, split='valid')
     test_dataset = load_dataset(module, root, split='test')
+
+    # to test on a few samples
+    # root = '../../data/small_dataset'
+    # dataset = load_dataset(module, root, split='all')

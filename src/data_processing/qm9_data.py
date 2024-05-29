@@ -28,7 +28,7 @@ from data_processing.paired_data import PharmacophoreDataset, CombinedSparseGrap
 #     (9, False): 7,  # F
 # }
 
-ATOM_TYPE_MAPPING = {'C': 1, 'N': 2, 'O': 3, 'F': 4}
+ATOM_TYPE_MAPPING = {'C': 0, 'N': 1, 'O': 2, 'F': 3}
 MAP_ATOM_TYPE_AROMATIC_TO_INDEX = {
     (6, False): 0, # C
     (6, True): 1,  # C.ar
@@ -59,7 +59,7 @@ class QM9Dataset(CombinedSparseGraphDataset):
 
     @property
     def processed_file_names(self) -> List[str]:
-        return [f'data.pt']
+        return [f'data_test_again.pt']
 
     def download(self):
         try:

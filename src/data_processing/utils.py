@@ -18,7 +18,7 @@ from rdkit.Chem.Draw import rdMolDraw2D
 # IPythonConsole.molSize = 600, 300
 
 ATOM_FAMILIES = ['Acceptor', 'Donor', 'Aromatic', 'Hydrophobe', 'LumpedHydrophobe', 'NegIonizable', 'PosIonizable', 'ZnBinder']
-ATOM_TYPE_MAPPING = {'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4, 'P': 5, 'S': 6, 'Cl': 7}
+# ATOM_TYPE_MAPPING = {'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4, 'P': 5, 'S': 6, 'Cl': 7}
 PP_TYPE_MAPPING = {
     'Linker': 0,
     'Hydrophobic': 1,
@@ -29,20 +29,36 @@ PP_TYPE_MAPPING = {
     'HBond_acceptor': 6,
     'Halogen': 7
 }
+# MAP_ATOM_TYPE_AROMATIC_TO_INDEX = {
+#     (1, False): 0,  # H
+#     (6, False): 1,  # C
+#     (6, True): 2,   # C.ar
+#     (7, False): 3,  # N
+#     (7, True): 4,   # N.ar
+#     (8, False): 5,  # O
+#     (8, True): 6,   # O.ar
+#     (9, False): 7,  # F
+#     (15, False): 8, # P
+#     (15, True): 9,  # P.ar
+#     (16, False): 10,# S
+#     (16, True): 11, # S.ar
+#     (17, False): 12 # Cl
+# }
+
+ATOM_TYPE_MAPPING = {'C': 0, 'N': 1, 'O': 2, 'F': 3, 'P': 4, 'S': 5, 'Cl': 6}
 MAP_ATOM_TYPE_AROMATIC_TO_INDEX = {
-    (1, False): 0,  # H
-    (6, False): 1,  # C
-    (6, True): 2,   # C.ar
-    (7, False): 3,  # N
-    (7, True): 4,   # N.ar
-    (8, False): 5,  # O
-    (8, True): 6,   # O.ar
-    (9, False): 7,  # F
-    (15, False): 8, # P
-    (15, True): 9,  # P.ar
-    (16, False): 10,# S
-    (16, True): 11, # S.ar
-    (17, False): 12 # Cl
+    (6, False): 0,  # C
+    (6, True): 1,   # C.ar
+    (7, False): 2,  # N
+    (7, True): 3,   # N.ar
+    (8, False): 4,  # O
+    (8, True): 5,   # O.ar
+    (9, False): 6,  # F
+    (15, False): 7, # P
+    (15, True): 8,  # P.ar
+    (16, False): 9, # S
+    (16, True): 10, # S.ar
+    (17, False): 11 # Cl
 }
 
 
