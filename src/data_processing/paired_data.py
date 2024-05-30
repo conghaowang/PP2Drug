@@ -90,10 +90,11 @@ class PharmacophoreData(Data):
 
 
 class PharmacophoreDataset(InMemoryDataset):
-    def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None):
+    def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None, aromatic=False):
         self.root = root
         self._split = split
         self._max_N = 86
+        self.aromatic = aromatic
         super(PharmacophoreDataset, self).__init__(root, transform, pre_transform, pre_filter)
         self.load(self.processed_paths[0])
 
@@ -199,7 +200,7 @@ class PharmacophoreDataset(InMemoryDataset):
                 continue
             num_feat_class = max(len(PP_TYPE_MAPPING.keys()), len(MAP_ATOM_TYPE_AROMATIC_TO_INDEX.keys()))
             try:
-                _, x, atomic_numbers, pos, num_nodes = self.extract_atom_features(rdmol, num_feat_class)
+                _, x, atomic_numbers, pos, num_nodes = self.extract_atom_features(rdmol, num_feat_class, aromatic=self.aromatic)
                 edge_mask = self.make_edge_mask(num_nodes, self._max_N)
             except KeyError:  # some elements are not considered, skip such ligands
                 continue
@@ -238,7 +239,7 @@ class PharmacophoreDataset(InMemoryDataset):
         self.save(data_list, self.processed_paths[0])
         self.save_pp_info(pp_info)
 
-    def extract_atom_features(self, mol, num_class):
+    def extract_atom_features(self, mol, num_class, aromatic=False):
         '''
             calculate:
                 h: encoding of atom type 
@@ -264,7 +265,11 @@ class PharmacophoreDataset(InMemoryDataset):
         # one_hot_h_tensor = torch.nn.functional.one_hot(h_tensor, num_classes=len(atom_type_mapping.keys())).to(torch.float)
         one_hot_h_tensor = torch.nn.functional.one_hot(h_tensor, num_classes=num_class).to(torch.float)
         types_with_aromatic_tensor = torch.tensor(np.array(types_with_aromatic_mapped), dtype=torch.long)
-        one_hot_types_with_aromatic_tensor = torch.nn.functional.one_hot(types_with_aromatic_tensor, num_classes=num_class).to(torch.float)
+        if aromatic:
+            one_hot_types_with_aromatic_tensor = torch.nn.functional.one_hot(types_with_aromatic_tensor, num_classes=num_class).to(torch.float)
+        else:
+            one_hot_types_with_aromatic_tensor = None
+        
         atom_positions_tensor = torch.tensor(np.array(atom_positions), dtype=torch.float)
 
         return one_hot_h_tensor, one_hot_types_with_aromatic_tensor, types_tensor, atom_positions_tensor, num_nodes_tensor
@@ -465,7 +470,7 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
         self._split = split
         self.aromatic = aromatic
         # self._max_N = 86 * 2
-        super(CombinedSparseGraphDataset, self).__init__(root, split, transform, pre_transform, pre_filter)
+        super(CombinedSparseGraphDataset, self).__init__(root, split, transform, pre_transform, pre_filter, aromatic=aromatic)
         self.load(self.processed_paths[0])
 
     @property
@@ -519,7 +524,7 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
             else:
                 num_feat_class = max(len(PP_TYPE_MAPPING.keys()), len(ATOM_TYPE_MAPPING.keys()))
             try:
-                x, x_aromatic, atomic_numbers, pos, num_nodes = self.extract_atom_features(rdmol, num_feat_class)
+                x, x_aromatic, atomic_numbers, pos, num_nodes = self.extract_atom_features(rdmol, num_feat_class, aromatic=self.aromatic)
                 # edge_mask = self.make_edge_mask(num_nodes)
             except KeyError as e:  # some elements are not considered, skip such ligands
                 print(f'Ligand {raw_path} contains rare elements: {e}')
@@ -584,8 +589,8 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
         return edge_mask
 
 
-def load_dataset(module, root, split):
-    dataset = module(root=root, split=split)
+def load_dataset(module, root, split, aromatic=False):
+    dataset = module(root=root, split=split, aromatic=aromatic)
     return dataset
 
 
@@ -600,9 +605,9 @@ if __name__ == '__main__':
 
     module = CombinedSparseGraphDataset # CombinedGraphDataset # PharmacophoreDataset
     root = '../../data/cleaned_crossdocked_data'
-    # train_dataset = load_dataset(module, root, split='train')
-    valid_dataset = load_dataset(module, root, split='valid')
-    test_dataset = load_dataset(module, root, split='test')
+    train_dataset = load_dataset(module, root, split='train', aromatic=False)
+    valid_dataset = load_dataset(module, root, split='valid', aromatic=False)
+    test_dataset = load_dataset(module, root, split='test', aromatic=False)
 
     # to test on a few samples
     # root = '../../data/small_dataset'
