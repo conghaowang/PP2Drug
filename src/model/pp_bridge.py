@@ -156,10 +156,10 @@ class PPBridge(pl.LightningModule):
         self.total_training_steps = training_config['total_training_steps']
 
         self.save_hyperparameters(ignore=['backbone'])
-        try:
-            OmegaConf.save(config=config, f=os.path.join(self.trainer.log_dir, self.bridge_type+'.yml'))
-        except Exception as e:
-            print('config not saved since', e)
+        # try:
+        #     OmegaConf.save(config=config, f=os.path.join(self.trainer.log_dir, self.bridge_type+'.yml'))
+        # except Exception as e:
+        #     print('config not saved since', e)
         # resuming from checkpoint or any step has not been implemented yet
         self.resume_checkpoint = training_config.get('resume_checkpoint', None)
         self._resume_checkpoint()
