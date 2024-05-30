@@ -261,7 +261,8 @@ class PharmacophoreDataset(InMemoryDataset):
         num_nodes_tensor = torch.tensor(num_nodes, dtype=torch.long)
         h_tensor = torch.tensor(np.array(h), dtype=torch.long)
         types_tensor = torch.tensor(np.array(types), dtype=torch.float)
-        one_hot_h_tensor = torch.nn.functional.one_hot(h_tensor, num_classes=len(atom_type_mapping.keys())).to(torch.float)
+        # one_hot_h_tensor = torch.nn.functional.one_hot(h_tensor, num_classes=len(atom_type_mapping.keys())).to(torch.float)
+        one_hot_h_tensor = torch.nn.functional.one_hot(h_tensor, num_classes=num_class).to(torch.float)
         types_with_aromatic_tensor = torch.tensor(np.array(types_with_aromatic_mapped), dtype=torch.long)
         one_hot_types_with_aromatic_tensor = torch.nn.functional.one_hot(types_with_aromatic_tensor, num_classes=num_class).to(torch.float)
         atom_positions_tensor = torch.tensor(np.array(atom_positions), dtype=torch.float)
@@ -459,25 +460,34 @@ class CombinedGraphDataset(PharmacophoreDataset):
 
 
 class CombinedSparseGraphDataset(PharmacophoreDataset):
-    def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None):
+    def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None, aromatic=False):
         self.root = root
         self._split = split
+        self.aromatic = aromatic
         # self._max_N = 86 * 2
         super(CombinedSparseGraphDataset, self).__init__(root, split, transform, pre_transform, pre_filter)
         self.load(self.processed_paths[0])
 
     @property
     def processed_file_names(self):
-        if self._split == 'train':
-            return ['train_combined_sparse_graph.pt']
-        elif self._split == 'test':
-            return ['test_combined_sparse_graph.pt']
-        elif self._split == 'valid':
-            return ['valid_combined_sparse_graph.pt']
-        elif self._split == 'all':
-            return ['data_combined_sparse_graph.pt']
-        else: 
-            raise ValueError('split must be "train", "valid", "test" or "all"')
+        assert self._split in ['train', 'valid', 'test', 'all']
+        if self.aromatic:
+            processed_file_name = f'{self._split}_aromatic_combined_sparse_graph.pt'
+        else:
+            processed_file_name = f'{self._split}_combined_sparse_graph.pt'
+
+        return [processed_file_name]
+
+        # if self._split == 'train':
+        #     return ['train_combined_sparse_graph.pt']
+        # elif self._split == 'test':
+        #     return ['test_combined_sparse_graph.pt']
+        # elif self._split == 'valid':
+        #     return ['valid_combined_sparse_graph.pt']
+        # elif self._split == 'all':
+        #     return ['data_combined_sparse_graph.pt']
+        # else: 
+        #     raise ValueError('split must be "train", "valid", "test" or "all"')
         
     def process(self):
         data_list = []
@@ -504,9 +514,12 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
             # for atom in rdmol.GetAtoms():
             #     print(atom.GetSymbol())
 
-            num_feat_class = max(len(PP_TYPE_MAPPING.keys()), len(MAP_ATOM_TYPE_AROMATIC_TO_INDEX.keys()))
+            if self.aromatic:
+                num_feat_class = max(len(PP_TYPE_MAPPING.keys()), len(MAP_ATOM_TYPE_AROMATIC_TO_INDEX.keys()))
+            else:
+                num_feat_class = max(len(PP_TYPE_MAPPING.keys()), len(ATOM_TYPE_MAPPING.keys()))
             try:
-                _, x, atomic_numbers, pos, num_nodes = self.extract_atom_features(rdmol, num_feat_class)
+                x, x_aromatic, atomic_numbers, pos, num_nodes = self.extract_atom_features(rdmol, num_feat_class)
                 # edge_mask = self.make_edge_mask(num_nodes)
             except KeyError as e:  # some elements are not considered, skip such ligands
                 print(f'Ligand {raw_path} contains rare elements: {e}')
@@ -521,7 +534,16 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
 
             CoM_tensor = self.compute_CoM(pos, atomic_numbers)
 
-            target_x, target_pos, node_pp_index = self.compute_target(x, pos, pp_atom_indices, pp_positions, pp_types, pp_index, CoM_tensor)
+            if self.aromatic:
+                feat = x_aromatic
+            else:
+                feat = x
+            target_x, target_pos, node_pp_index = self.compute_target(feat, pos, pp_atom_indices, pp_positions, pp_types, pp_index, CoM_tensor)
+            x_ctr, pos_ctr, Gt_mask = self.combine_target(feat, pos, target_x, target_pos)
+            target_x_ctr, target_pos_ctr, _ = self.combine_target(target_x, target_pos, target_x, target_pos)
+            edge_mask_ctr = self.make_edge_mask(num_nodes * 2)
+            node_mask_ctr = torch.ones([1, num_nodes * 2], dtype=torch.bool)
+
             if len(pp_info[filename].keys()) == 0:
                 pp_info[filename].update({
                     'pp_atom_indices': [pp_atom_indices],
@@ -536,10 +558,6 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
                 pp_info[filename]['pp_types'].append(pp_types)
                 pp_info[filename]['pp_index'].append(pp_index)
                 pp_info[filename]['node_pp_index'].append(node_pp_index)
-            x_ctr, pos_ctr, Gt_mask = self.combine_target(x, pos, target_x, target_pos)
-            target_x_ctr, target_pos_ctr, _ = self.combine_target(target_x, target_pos, target_x, target_pos)
-            edge_mask_ctr = self.make_edge_mask(num_nodes * 2)
-            node_mask_ctr = torch.ones([1, num_nodes * 2], dtype=torch.bool)
 
             data = Data(x=x_ctr, pos=pos_ctr, target_x=target_x_ctr, target_pos=target_pos_ctr, Gt_mask=Gt_mask, ligand_name=filename)
             data_list.append(data)
