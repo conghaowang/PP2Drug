@@ -39,6 +39,15 @@ PP_TYPE_MAPPING = {
 # }
 
 ATOM_TYPE_MAPPING = {'C': 0, 'N': 1, 'O': 2, 'F': 3, 'P': 4, 'S': 5, 'Cl': 6}
+MAP_ATOMIC_NUMBER_TO_INDEX = {
+    6: 0,  # C
+    7: 1,  # N
+    8: 2,  # O
+    9: 3,  # F
+    15: 4, # P
+    16: 5, # S
+    17: 6  # Cl
+}
 MAP_ATOM_TYPE_AROMATIC_TO_INDEX = {
     (6, False): 0,  # C
     (6, True): 1,   # C.ar

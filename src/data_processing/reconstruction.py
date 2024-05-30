@@ -22,7 +22,8 @@ def get_atomic_number_from_index(index, mode='add_aromatic', index_to_atom_type=
     if mode == 'add_aromatic':
         atomic_number = [index_to_atom_type[i][0] for i in index.tolist()]
     else:
-        raise ValueError('mode not recognized')
+        atomic_number = [index_to_atom_type[i] for i in index.tolist()]
+        # raise ValueError('mode not recognized')
     return atomic_number
 
 
