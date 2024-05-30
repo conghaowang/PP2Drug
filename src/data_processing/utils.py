@@ -9,13 +9,6 @@ import matplotlib
 import matplotlib.pylab as plt
 import matplotlib.cm as cm
 from matplotlib.colors import Normalize
-from rdkit.Chem.Draw import IPythonConsole
-from rdkit.Chem import Draw
-from rdkit.Chem.Draw import rdMolDraw2D
-# from IPython.display import SVG, Image
-# IPythonConsole.drawOptions.addAtomIndices = True
-# IPythonConsole.ipython_useSVG = True
-# IPythonConsole.molSize = 600, 300
 
 ATOM_FAMILIES = ['Acceptor', 'Donor', 'Aromatic', 'Hydrophobe', 'LumpedHydrophobe', 'NegIonizable', 'PosIonizable', 'ZnBinder']
 # ATOM_TYPE_MAPPING = {'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4, 'P': 5, 'S': 6, 'Cl': 7}
