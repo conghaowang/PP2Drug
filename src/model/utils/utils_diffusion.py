@@ -96,6 +96,12 @@ def center2zero_combined_graph(x, node_mask, Gt_mask, mode='individual'):
 
 def center2zero_sparse_graph(x, Gt_mask, batch_info, mode='GT'):
     if mode == 'GT':
+        GT_mask = ~Gt_mask
+        mean = scatter_mean(x[GT_mask], batch_info[GT_mask], dim=0)
+        assert mean.size(-1) == 3
+        x = x - mean[batch_info]
+        return x
+    elif mode == 'G0':
         mean = scatter_mean(x[Gt_mask], batch_info[Gt_mask], dim=0)
         assert mean.size(-1) == 3
         x = x - mean[batch_info]
