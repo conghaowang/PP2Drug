@@ -53,7 +53,9 @@ def main(args):
         gradient_clip_algorithm='norm',
     )
     trainer.fit(model, train_loader, val_loader)
-    OmegaConf.save(config=config, f=os.path.join('src/lightning_logs', f'{log_name}_{datamodule}_{now}', args.config.split('/')[-1]))     # trainer.log_dir is the path of main.py, not the log path
+
+    with open(os.path.join(f'lightning_logs/{log_name}_{datamodule}_{now}', args.config.split('/')[-1]), 'w') as f:
+        OmegaConf.save(config=config, f=f.name)     # trainer.log_dir is the path of main.py, not the log path
 
 
 if __name__ == '__main__':
