@@ -40,13 +40,15 @@ MAP_ATOM_TYPE_AROMATIC_TO_INDEX = {
 }
 
 class QM9Dataset(CombinedSparseGraphDataset):
-    def __init__(self, root, split='all', transform=None, pre_transform=None, pre_filter=None):
+    def __init__(self, root, split='all', transform=None, pre_transform=None, pre_filter=None, aromatic=True):
         self.root = root
         self._split = split
+        assert aromatic == True    # only support aromatic=True for now, TODO: support non-aromatic
+        self.aromatic = aromatic  
         self.raw_url = ('https://deepchemdata.s3-us-west-1.amazonaws.com/datasets/molnet_publish/qm9.zip')
         self.raw_url2 = 'https://ndownloader.figshare.com/files/3195404'
         self.processed_url = 'https://data.pyg.org/datasets/qm9_v3.zip'
-        super(QM9Dataset, self).__init__(root, split, transform, pre_transform, pre_filter)
+        super(QM9Dataset, self).__init__(root, split, transform, pre_transform, pre_filter, aromatic=aromatic)
         self.load(self.processed_paths[0])
         
     @property
@@ -59,7 +61,7 @@ class QM9Dataset(CombinedSparseGraphDataset):
 
     @property
     def processed_file_names(self) -> List[str]:
-        return [f'data_test_again.pt']
+        return [f'data.pt']
 
     def download(self):
         try:
@@ -111,7 +113,7 @@ class QM9Dataset(CombinedSparseGraphDataset):
             except KeyError:  # some elements are not considered, skip such ligands
                 continue
             try:
-                pp_atom_indices, pp_positions, pp_types, pp_index = self.extract_pp(ligand, num_feat_class)
+                pp_atom_indices, pp_positions, pp_types, pp_index = self.extract_pp(ligand, num_feat_class, aromatic=self.aromatic)
                 assert pp_positions.size(1) == 3
             except Exception as e:
                 print(smiles, 'extract pp failed')
