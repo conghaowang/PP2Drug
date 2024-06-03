@@ -40,12 +40,23 @@ def extract_pp(ligand):
     return atom_indice_list, positions_array, pp_type_array, pp_index_array
 
 
+def center2zero(x, mean_dim=0):
+    # if x == None:
+    #     return None
+    mean = np.mean(x, axis=mean_dim, keepdims=True)
+    assert mean.shape[-1] == 3
+    x = x - mean
+    return x
+
+
 def pp_match(pp_types, pp_positions, ref_pp_info, threshold=1.5):
     pps = pp_types
     ref_pps = np.argmax(ref_pp_info['pp_types'].numpy(), axis=-1)
+    ref_pp_positions = ref_pp_info['pp_positions'].numpy()
+    ref_pp_positions = center2zero(ref_pp_positions, mean_dim=0)
     match = np.zeros_like(ref_pps)
     for i, ref_pp in enumerate(ref_pps):
-        ref_pos = ref_pp_info['pp_positions'][i].numpy()
+        ref_pos = ref_pp_positions[i]
         for j, pp in enumerate(pps):
             if pp == ref_pp:
                 pos = pp_positions[j]

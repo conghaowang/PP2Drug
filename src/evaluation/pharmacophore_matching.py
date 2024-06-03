@@ -42,9 +42,10 @@ def compute_matching_scores(generated_path, pp_info, threshold=1.5):
     for file in tqdm(os.listdir(generated_path)):
         smi = file.split('.')[0]
         mol_path = os.path.join(generated_path, smi+'.sdf')
-        rdmol = Chem.MolFromMolFile(mol_path, sanitize=False)
+        rdmol = Chem.MolFromMolFile(mol_path, sanitize=True)
         pbmol = next(pybel.readfile("sdf", mol_path))
         try:
+            rdmol = Chem.AddHs(rdmol)
             ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None, filtering=False)
         except:
             print('ligand init failed')
@@ -52,8 +53,8 @@ def compute_matching_scores(generated_path, pp_info, threshold=1.5):
         pp_atom_indices, pp_positions, pp_types, pp_index = extract_pp(ligand)
         
         ref_pp_info = pp_info[smi]
-        if ['pp_types', 'pp_positions'] not in list(ref_pp_info.keys()):
-            # print(ref_pp_info)
+        if not all(k in list(ref_pp_info.keys()) for k in ['pp_types', 'pp_positions']):
+            print(ref_pp_info)
             continue
         if isinstance(ref_pp_info['pp_types'], list):
             # print(ref_pp_info)
@@ -89,6 +90,7 @@ def plot_matching_scores(score_dict, save_path):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--path', '-p', type=str, default='../lightning_logs/vp_bridge_egnn_QM9Dataset_2024-05-22_19_48_30.573332/reconstructed_mols', help='Path to the generated molecules')
+    parser.add_argument('--dataset', '-d', type=str, default='cd', help='Dataset used for generation: qm9 or cd')
     args = parser.parse_args()
 
     # if args.path.endswith('aromatic_mode'):
@@ -99,8 +101,14 @@ if __name__ == '__main__':
     # mols, gen_map = load_generated_mols(args.path)
     # print(f'Loaded {len(mols)} generated molecules')
 
-    with open('../../data/qm9/metadata/pp_info.pkl', 'rb') as f:
-        pp_info = pickle.load(f)
+    if args.dataset == 'qm9':
+        with open('../../data/qm9/metadata/pp_info.pkl', 'rb') as f:
+            pp_info = pickle.load(f)
+    elif args.dataset == 'cd':
+        with open('../../data/cleaned_crossdocked_data/metadata/test_pp_info.pkl', 'rb') as f:
+            pp_info = pickle.load(f)
+    else:
+        raise ValueError('Invalid dataset')
     # pp_info = {k:v for k, v in pp_info.items() if k in gen_map.keys()}
 
     match_dict, score_dict = compute_matching_scores(args.path, pp_info)
