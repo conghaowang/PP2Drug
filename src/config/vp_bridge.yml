@@ -11,19 +11,34 @@ model:
     ema_decay: 0.999
     weight_decay: 1e-12
     weight_schedule: 'uniform' # 'uniform' # 'bridge_karras'
-    loss_x_weight: 1e+3
+    loss_x_weight: 1e+1
 
   backbone: 
-    type: 'EGNN'
-    feature_size: 13
+    type: 'SE3Transformer'
+    feature_size: 8 # 12
+    num_blocks: 1
     num_layers: 10
-    hidden_size: 512
+    hidden_size: 128
+    num_heads: 16
+    edge_feat_dim: 4  # edge type feat
+    num_r_gaussian: 20
+    knn: 16 # !
+    num_node_types: 8 # 12
+    act_fn: relu
+    norm: True
+    cutoff_mode: knn  # [radius, none]
+    ew_net_type: global  # [r, m, none]
+    num_x2h: 1
+    num_h2x: 1
+    r_max: 10.
+    x2h_out_fc: False
+    sync_twoup: False
     time_cond: True # False
     xT_type: 'pp' # 'noise' # 'none' # 'pp'
     xT_mode: 'concat_graph' # 'concat_graph' # 'none'
 
 training:
-  batch_size: 2500
+  batch_size: 150
   log_interval: 100
   save_interval: 1000
   test_interval: 1000
@@ -49,3 +64,4 @@ data:
   max_node_num: 86
   coord_dim: 3
   module: CombinedSparseGraphDataset # CombinedSparseGraphDataset # CombinedGraphDataset # PharmacophoreDataset
+  aromatic: true
