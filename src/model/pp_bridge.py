@@ -302,6 +302,7 @@ class PPBridge(pl.LightningModule):
                 Gt_mask = Gt_mask[0]
                 node_mask = node_mask[0]
                 x0 = center2zero_sparse_graph(x0, Gt_mask.squeeze(-1), batch_info)
+                xT = center2zero_sparse_graph(xT, Gt_mask.squeeze(-1), batch_info)
 
                 if self.xT_type == 'noise':
                     # xT = xT[0]  # (1, N, 3) => (N, 3)
@@ -566,7 +567,7 @@ class PPBridge(pl.LightningModule):
         pos_dims = x_start.dim()
 
         def bridge_sample(x0, xT, t, dims, noise):
-            t = append_dims(t, dims)
+            t = append_dims(t, dims)    # [1, 1, 2, 2, 2, ...] => [[1], [1], [2], [2], [2], ...]
             # std_t = th.sqrt(t)* th.sqrt(1 - t / self.sigma_max)
             if self.bridge_type.startswith('ve'):
                 std_t = t* torch.sqrt(1 - t**2 / self.sigma_max**2)
