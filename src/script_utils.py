@@ -4,19 +4,19 @@ import torch
 from torch_geometric.loader import DataLoader
 from torch.utils.data import random_split
 
-def load_dataset(cls_name, root, split):
+def load_dataset(cls_name, root, split, aromatic=False):
     if cls_name == 'QM9Dataset':
         path = f'data_processing.qm9_data'
     else:
         path = f'data_processing.paired_data'
     parent_module = importlib.import_module(path)
-    dataset = getattr(parent_module, cls_name)(root=root, split=split)
+    dataset = getattr(parent_module, cls_name)(root=root, split=split, aromatic=aromatic)
     return dataset
 
 
-def load_data(cls_name, root, split='train', batch_size=32, num_workers=0):
+def load_data(cls_name, root, split='train', batch_size=32, num_workers=0, aromatic=False):
     # dataset = PharmacophoreDataset(root=root, split=split)
-    dataset = load_dataset(cls_name, root, split)
+    dataset = load_dataset(cls_name, root, split, aromatic=aromatic)
     if split == 'train':
         return dataset, DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     else:
