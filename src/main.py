@@ -20,12 +20,25 @@ def main(args):
     # train_dataset, train_loader = load_data(dataset_root_path, split='all', batch_size=config.training.batch_size)
 
     datamodule = config.data.module
+    aromatic = config.data.aromatic
     if datamodule == 'QM9Dataset':
         _, _, train_loader, val_loader = load_qm9_data(root=dataset_root_path, split='train', batch_size=config.training.batch_size)
+        if aromatic:
+            config.model.backbone.feature_size = 8    # num atom type is 7, but pp type is 8
+            print(f'Loading {datamodule} data with aromatic features')
+        else:
+            config.model.backbone.feature_size = 8    # num atom type is 4, but pp type is 8
+            print(f'Loading {datamodule} data without aromatic features')
     else:
-        _, train_loader = load_data(datamodule, dataset_root_path, split='train', batch_size=config.training.batch_size)
-        _, val_loader = load_data(datamodule, dataset_root_path, split='valid', batch_size=config.training.batch_size)
+        _, train_loader = load_data(datamodule, dataset_root_path, split='train', batch_size=config.training.batch_size, aromatic=aromatic)
+        _, val_loader = load_data(datamodule, dataset_root_path, split='valid', batch_size=config.training.batch_size, aromatic=aromatic)
         # test_dataset, test_loader = load_data(dataset_root_path, split='test', batch_size=config.training.batch_size)
+        if aromatic:
+            config.model.backbone.feature_size = 12
+            print(f'Loading {datamodule} data with aromatic features')
+        else:
+            config.model.backbone.feature_size = 8
+            print(f'Loading {datamodule} data without aromatic features')
 
     model = PPBridge(config)
     now = str(datetime.now()).replace(" ", "_").replace(":", "_")

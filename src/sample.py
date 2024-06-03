@@ -12,6 +12,7 @@ from rdkit import Chem
 from tqdm import tqdm
 from data_processing.paired_data import PharmacophoreDataset, CombinedGraphDataset
 from data_processing.qm9_data import MAP_ATOM_TYPE_AROMATIC_TO_INDEX
+from data_processing.utils import MAP_ATOMIC_NUMBER_TO_INDEX
 from data_processing.reconstruction import get_atomic_number_from_index, is_aromatic_from_index, reconstruct_from_generated
 from model.pp_bridge import PPBridge
 from model.pp_bridge_sampler import PPBridgeSampler
@@ -35,11 +36,25 @@ def reconstruct(x, h, Gt_mask, batch_info, ligand_names, mol_save_path, datamodu
         h_class = torch.argmax(h_i, dim=-1)
         atom_index = h_class.detach().cpu()
         if datamodule == 'QM9Dataset':
+            # TODO: consider when qm9 data has no aromatic information, currently all qm9 data has aromatic information. 
+            # but we can't differentiate the data by feat_size since they are all 8
             atom_type = get_atomic_number_from_index(atom_index, index_to_atom_type=index_to_atom_type_aromatic)
             atom_aromatic = is_aromatic_from_index(atom_index, index_to_atom_type=index_to_atom_type_aromatic)
         else:
-            atom_type = get_atomic_number_from_index(atom_index)
-            atom_aromatic = is_aromatic_from_index(atom_index)
+            if basic_mode: 
+                # there are actually two conditions in basic mode: one is the data already have no aromatic information (feat_size=8), the other is we dont consider aromaticity
+                if x.size(-1) == 8:
+                    index_to_atom_type = MAP_ATOMIC_NUMBER_TO_INDEX
+                    atom_type = get_atomic_number_from_index(atom_index, index_to_atom_type=index_to_atom_type)
+                    atom_aromatic = None
+
+                # consider when we have aromaticity in the data but we dont want to consider it 
+                else:
+                    atom_type = get_atomic_number_from_index(atom_index)
+                    atom_aromatic = None
+            else:
+                atom_type = get_atomic_number_from_index(atom_index)
+                atom_aromatic = is_aromatic_from_index(atom_index)
         pos = x_i.detach().cpu().tolist()
         try:
             mol = reconstruct_from_generated(pos, atom_type, atom_aromatic, basic_mode=basic_mode)
@@ -67,13 +82,15 @@ def sample(config_file, ckpt_path, save_path, steps=40, device='cuda:0', remove_
     sampler = PPBridgeSampler(config, ckpt_path, device)
 
     dataset_root_path = config.data.root # '/data/conghao001/pharmacophore2drug/PP2Drug/data/small_dataset' # config.data.root
-    print(f'Loading data from {dataset_root_path}')
+    # print(f'Loading data from {dataset_root_path}')
+    # print((not basic_mode))
     datamodule = config.data.module
     if datamodule == 'QM9Dataset':
         test_dataset, test_loader = load_qm9_data(root=dataset_root_path, split='test', batch_size=config.sampling.batch_size)
     else:
-        test_dataset, test_loader = load_data(datamodule, dataset_root_path, split='test', batch_size=config.sampling.batch_size)
+        test_dataset, test_loader = load_data(datamodule, dataset_root_path, split='test', batch_size=config.sampling.batch_size, aromatic=config.data.aromatic)
 
+    print(f'Loading data from {test_dataset.processed_paths[0]}')
     success = 0
     all_x, all_x_traj, all_h, all_h_traj, all_nfe = [], [], [], [], []
     for batch in tqdm(test_loader):
