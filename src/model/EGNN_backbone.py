@@ -341,14 +341,14 @@ class EGNN_combined_graph(nn.Module):
             h = torch.cat([h, t], dim=-1)
             # print(h.device, Gt_mask.device)
             h = self.embedding_in(h) # * Gt_mask[:, None] + h_ * (~Gt_mask)[:, None]
-        all_x = [x]
-        all_h = [h]
+        # all_x = [x]
+        # all_h = [h]
         for l_idx, layer in enumerate(self.net):
             edge_index = self._connect_edge(x, Gt_mask, batch, bs, n_node)
             edge_type = self._build_edge_type(edge_index, Gt_mask)
             h, x = layer(h, x, edge_index, Gt_mask, edge_attr=edge_type)
-            all_x.append(x)
-            all_h.append(h)
+            # all_x.append(x)
+            # all_h.append(h)
         # x = x.view(bs, n_node, -1)
         # h = h.view(bs, n_node, -1)
         h = self.embedding_out(h)
