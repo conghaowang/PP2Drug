@@ -8,7 +8,7 @@ import subprocess
 from utils import build_pdb_dict
 
 
-def molecule_docking(bridge_type, res_path, gen_files, pdb_rev_dict, root):
+def molecule_docking(res_path, gen_files, pdb_rev_dict, root, aromatic=True, gpu=0):
     for gen_file in tqdm(gen_files):
         ligand_name = gen_file.split('.')[0]
         pattern = r"(\w+_[A-Z]_rec)"
@@ -31,27 +31,37 @@ def molecule_docking(bridge_type, res_path, gen_files, pdb_rev_dict, root):
         # log_path = '../../docking_res/logs/' + bridge_type
         # out_path = '../../docking_res/output/' + bridge_type
 
-        log_path = os.path.join(root, 'logs')
-        out_path = os.path.join(root, 'output')
+        log_folder = 'logs_aromatic' if aromatic else 'logs'
+        out_folder = 'output_aromatic' if aromatic else 'output'
+        log_path = os.path.join(root, log_folder)
+        out_path = os.path.join(root, out_folder)
         os.makedirs(log_path, exist_ok=True)
         os.makedirs(out_path, exist_ok=True)
 
         log_file = os.path.join(log_path, ligand_name + '.log')
         out_file = os.path.join(out_path, ligand_name + '.sdf')
-        subprocess.run(['gnina', '-r', protein_file, '-l', ligand_file, '--autobox_ligand', autobox_ligand_file, '-o', out_file, '--exhaustiveness', '16', '--log', log_file, '-q'], stdout=subprocess.DEVNULL)
+
+        if os.path.exists(out_file) and os.path.exists(log_file):
+            if os.path.getsize(out_file) > 0 and os.path.getsize(log_file) > 0:
+                # print(f"Docking result for ligand {ligand_name} already exists")
+                continue
+        subprocess.run(['gnina', '-r', protein_file, '-l', ligand_file, '--autobox_ligand', autobox_ligand_file, '-o', out_file, '--exhaustiveness', '16', '--log', log_file, '--device', gpu, '-q'], stdout=subprocess.DEVNULL)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--bridge', '-b', type=str, default='vp', help='Type of bridge to use')
+    # parser.add_argument('--bridge', '-b', type=str, default='vp', help='Type of bridge to use')
+    parser.add_argument('--aromatic', '-a', action='store_true', help='Use aromatic atoms')
     parser.add_argument('--root', '-r', type=str, required=True, help='Path of lightning logs')
+    parser.add_argument('--gpu', '-g', type=str, default=0, help='GPU to use for docking')
     args = parser.parse_args()
-    bridge_type = args.bridge
+    # bridge_type = args.bridge
 
     # res_path = '../../generation_results/' + bridge_type
-    res_path = os.path.join(args.root, bridge_type)
+    folder_name = 'reconstructed_mols_aromatic_mode' if args.aromatic else 'reconstructed_mols'
+    res_path = os.path.join(args.root, folder_name)
     raw_data_path = '../../data/cleaned_crossdocked_data/raw'
 
     gen_files = os.listdir(res_path)
     pdb_dict, pdb_rev_dict = build_pdb_dict(raw_data_path)
 
-    molecule_docking(bridge_type, res_path, gen_files, pdb_rev_dict, root=args.root)
+    molecule_docking(res_path, gen_files, pdb_rev_dict, root=args.root, aromatic=args.aromatic, gpu=args.gpu)
