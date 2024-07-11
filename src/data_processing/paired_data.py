@@ -324,12 +324,15 @@ class PharmacophoreDataset(InMemoryDataset):
         CoM = sum_pos / sum_mass
         return CoM
     
+    def compute_pp_center(self, pp_positions):
+        return torch.mean(pp_positions, dim=0)
+    
     def CoM2zero(self, pos, CoM):
         # translate the ligand so that its center of mass is at the origin
         pos -= CoM
         return pos
     
-    def compute_target(self, x, pos, pp_atom_indices, pp_positions, pp_types, pp_index, CoM_tensor, noise_std=0.01):
+    def compute_target(self, x, pos, pp_atom_indices, pp_positions, pp_types, pp_index, center_tensor, noise_std=0.01):
         '''
             Compute the target of the diffusion bridge, which is each atom's feat/pos destination regarding its pharmacophore membership
             Should we include a bit noise when initializing the target pos?
@@ -347,13 +350,13 @@ class PharmacophoreDataset(InMemoryDataset):
             if i not in atom_in_pp:  # if the atom is not in any pharmacophore, we set its target type to Linker:0 and target position to CoM plus a bit noise
                 target_x[i] = torch.nn.functional.one_hot(torch.tensor([0]), num_classes=pp_types.size(1)).to(torch.float)
                 # target_pos[i] = torch.zeros(pos.size(1))
-                target_pos[i] = CoM_tensor + torch.randn_like(CoM_tensor) * noise_std
+                target_pos[i] = center_tensor + torch.randn_like(center_tensor) # * noise_std
                 node_pp_index[i] = -1
             else:  # if the atom is in a pharmacophore, we set its target type to the pharmacophore type and target position to the pharmacophore position
                 for j, atom_indices in enumerate(pp_atom_indices):
                     if i in atom_indices:
                         target_x[i] = pp_types[j]
-                        target_pos[i] = pp_positions[j] + torch.randn_like(pp_positions[j]) * noise_std
+                        target_pos[i] = pp_positions[j] + torch.randn_like(pp_positions[j]) # * noise_std
                         node_pp_index[i] = j    # = pp_index[j]
                         break
         
@@ -537,13 +540,16 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
                 print(e)
                 continue
 
-            CoM_tensor = self.compute_CoM(pos, atomic_numbers)
+            # CoM_tensor = self.compute_CoM(pos, atomic_numbers)
+            pp_center_tensor = self.compute_pp_center(pp_positions)
+            # print(pp_center_tensor.size())
+            assert pp_center_tensor.size(0) == 3
 
             if self.aromatic:
                 feat = x_aromatic
             else:
                 feat = x
-            target_x, target_pos, node_pp_index = self.compute_target(feat, pos, pp_atom_indices, pp_positions, pp_types, pp_index, CoM_tensor)
+            target_x, target_pos, node_pp_index = self.compute_target(feat, pos, pp_atom_indices, pp_positions, pp_types, pp_index, pp_center_tensor)
             x_ctr, pos_ctr, Gt_mask = self.combine_target(feat, pos, target_x, target_pos)
             target_x_ctr, target_pos_ctr, _ = self.combine_target(target_x, target_pos, target_x, target_pos)
             edge_mask_ctr = self.make_edge_mask(num_nodes * 2)
@@ -603,11 +609,14 @@ if __name__ == '__main__':
     # valid_dataset = CombinedGraphDataset(root='../../data/cleaned_crossdocked_data', split='valid')
     # test_dataset = CombinedGraphDataset(root='../../data/cleaned_crossdocked_data', split='test')
 
+    aromatic = sys.argv[1] == 'aromatic'
+    print(f'aromatic: {aromatic}')
+
     module = CombinedSparseGraphDataset # CombinedGraphDataset # PharmacophoreDataset
     root = '../../data/cleaned_crossdocked_data'
-    train_dataset = load_dataset(module, root, split='train', aromatic=False)
-    valid_dataset = load_dataset(module, root, split='valid', aromatic=False)
-    test_dataset = load_dataset(module, root, split='test', aromatic=False)
+    train_dataset = load_dataset(module, root, split='train', aromatic=aromatic)
+    valid_dataset = load_dataset(module, root, split='valid', aromatic=aromatic)
+    test_dataset = load_dataset(module, root, split='test', aromatic=aromatic)
 
     # to test on a few samples
     # root = '../../data/small_dataset'
