@@ -644,29 +644,33 @@ class PPBridge(pl.LightningModule):
             # print(Gt_mask_.sum())
             # print(denoised_x[Gt_mask_].size(), original_h.size())
 
-            loss_x_mse = (denoised_x[Gt_mask_] - original_h) ** 2
-            # loss_x_ce = F.cross_entropy(denoised_x[Gt_mask_], original_h.argmax(dim=-1), reduction='none').unsqueeze(-1)
+            # loss_x_mse = (denoised_x[Gt_mask_] - original_h) ** 2
+            loss_x_ce = F.cross_entropy(denoised_x[Gt_mask_], original_h.argmax(dim=-1), reduction='none').unsqueeze(-1)
             loss_pos_mse = (denoised_pos[Gt_mask_] - original_x) ** 2
             # print(denoised_x[Gt_mask_].size(), original_h.argmax(dim=-1).size(), loss_x_ce.size())
 
-            losses["x_mse"] = mean_flat(loss_x_mse)      
+            # losses["x_mse"] = mean_flat(loss_x_mse)      
             # losses['x_ce'] = mean_flat(loss_x_ce)
+            losses['x_ce'] = scatter_mean_flat(loss_x_ce, batch_info[Gt_mask_])
+
             # losses['pos_mse'] = mean_flat((denoised_pos[Gt_mask_] - original_x) ** 2)
             losses["pos_mse"] = scatter_mean_flat(loss_pos_mse, batch_info[Gt_mask_])
 
-            losses["weighted_x_mse"] = mean_flat(x_weights[Gt_mask_] * loss_x_mse)
+            # losses["weighted_x_mse"] = mean_flat(x_weights[Gt_mask_] * loss_x_mse)
             # print('loss_x_ce', loss_x_ce.size(), x_weights[Gt_mask_].size())
             # losses['weighted_x_ce'] = mean_flat(x_weights[Gt_mask_] * loss_x_ce)
+            losses['weighted_x_ce'] = scatter_mean_flat(x_weights[Gt_mask_] * loss_x_ce, batch_info[Gt_mask_])
+
             # losses["weighted_pos_mse"] = mean_flat(pos_weights[Gt_mask_] * (denoised_pos[Gt_mask_] - original_x) ** 2)
             losses["weighted_pos_mse"] = scatter_mean_flat(pos_weights[Gt_mask_] * loss_pos_mse, batch_info[Gt_mask_])
 
-            losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_mse, dim=-1) + 
-                                               torch.sum(pos_weights[Gt_mask_] * loss_pos_mse, dim=-1),
-                                               batch_info[Gt_mask_])
-            
-            # losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_ce, dim=-1) + 
+            # losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_mse, dim=-1) + 
             #                                    torch.sum(pos_weights[Gt_mask_] * loss_pos_mse, dim=-1),
             #                                    batch_info[Gt_mask_])
+            
+            losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_ce, dim=-1) + 
+                                               torch.sum(pos_weights[Gt_mask_] * loss_pos_mse, dim=-1),
+                                               batch_info[Gt_mask_])
 
         else:
             losses["x_mse"] = mean_flat((denoised_x - h_start) ** 2)      # x should be the atom type one hot encoding, think twice of mse loss

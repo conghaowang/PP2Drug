@@ -312,8 +312,8 @@ class SE3Transformer(nn.Module):
             Gt_mask: mask for atom nodes - pp nodes are 0, atom nodes are 1
         '''
 
-        all_x = [x]
-        all_h = [h]
+        # all_x = [x]
+        # all_h = [h]
 
         h_ = h
         if self.time_cond:
@@ -337,8 +337,8 @@ class SE3Transformer(nn.Module):
 
             for l_idx, layer in enumerate(self.base_block):
                 h, x = layer(h, x, edge_type, edge_index, Gt_mask, e_w=e_w, fix_x=fix_x)
-            all_x.append(x)
-            all_h.append(h)
+            # all_x.append(x)
+            # all_h.append(h)
 
         h = self.embedding_out(h)
         h = h * Gt_mask[:, None] + h_ * (~Gt_mask)[:, None]     # w/o GT should not matter, since loss is computed on Gt part only
