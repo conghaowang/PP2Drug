@@ -390,7 +390,7 @@ class PPBridgeSampler(PPBridge):
                 # Heun's method
                 x_2 = x + d_x * dt
                 h_2 = h + d_h * dt
-                denoised_2_h, denoised_2_x = denoiser(self.bridge_model.backbone, sigmas[i] * s_in, h_2, x_2, h_T, x_T, node_mask=node_mask, Gt_mask=Gt_mask, batch_info=batch_info)
+                denoised_2_h, denoised_2_x = denoiser(self.bridge_model.backbone, sigmas[i + 1] * s_in, h_2, x_2, h_T, x_T, node_mask=node_mask, Gt_mask=Gt_mask, batch_info=batch_info)
                 if bridge_type == 've':
                     # d_2 =  (x_2 - denoised_2) / append_dims(sigmas[i + 1], x.ndim)
                     d_2_x = self.to_d(x_2,  sigmas[i + 1], denoised_2_x, x_T, sigma_max, w=guidance)
