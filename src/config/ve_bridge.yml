@@ -57,7 +57,7 @@ training:
       f_min: [ 1.]
 
 sampling:
-  batch_size: 1000
+  batch_size: 2000
 
 data:
   root: ../data/cleaned_crossdocked_data
