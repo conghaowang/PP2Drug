@@ -19,10 +19,12 @@ def molecule_docking(res_path, gen_files, pdb_rev_dict, root, aromatic=True, gpu
             print(f"Cannot identify the receptor from the file name of ligand {ligand_name}")
             continue
 
+        ligand_fn = ligand_name[ligand_name.rfind('rec')+4:ligand_name.rfind('lig')+3]
+
         ligand_file = os.path.join(res_path, gen_file)
         pdb_folder = pdb_rev_dict[gen_file]
         protein_file = os.path.join(raw_data_path, pdb_folder, pr_pdb + '.pdb')
-        autobox_ligand_file = os.path.join(raw_data_path, pdb_folder, gen_file)
+        autobox_ligand_file = os.path.join(raw_data_path, pdb_folder, ligand_fn + '.pdb')
 
         if os.path.exists(ligand_file) == False or os.path.exists(protein_file) == False or os.path.exists(autobox_ligand_file) == False:
             print(f"Cannot find the ligand file, protein file or original ligand file for ligand {ligand_name}")
