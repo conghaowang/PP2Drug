@@ -39,14 +39,26 @@ class PPBridge(pl.LightningModule):
         training_config = config['training']
         data_config = config['data']
 
-        self.sigma_data = model_config['sigma_data']
-        self.sigma_max = model_config['sigma_max'] 
-        self.sigma_min = model_config['sigma_min']
+        # self.sigma_data = model_config['sigma_data']
+        # self.sigma_max = model_config['sigma_max'] 
+        # self.sigma_min = model_config['sigma_min']
+        self.sigma_data_feat = data_config['feat']['sigma_data']
+        self.sigma_data_pos = data_config['pos']['sigma_data']
+        self.sigma_data_end_feat = data_config['feat']['sigma_data_end']
+        self.sigma_data_end_pos = data_config['pos']['sigma_data_end']
+
+        self.sigma_max_feat = data_config['feat']['sigma_max']
+        self.sigma_max_pos = data_config['pos']['sigma_max']
+        self.sigma_min_feat = data_config['feat']['sigma_min']
+        self.sigma_min_pos = data_config['pos']['sigma_min']
+
         self.beta_d = model_config['beta_d']
         self.beta_min = model_config['beta_min']
-        self.sigma_data_end = self.sigma_data
+        # self.sigma_data_end_feat = self.sigma_data_feat
+        # self.sigma_data_end_pos = self.sigma_data_pos
         # self.cov_xy = cov_xy
-        self.cov_xy = self.sigma_data**2 / 2
+        self.cov_xy_feat = self.sigma_data_feat**2 / 2
+        self.cov_xy_pos = self.sigma_data_pos**2 / 2
         self.c = 1
 
         self.weight_schedule = model_config['weight_schedule']
@@ -180,7 +192,7 @@ class PPBridge(pl.LightningModule):
             self.time_scheduler = UniformSampler(self.num_timesteps)
         elif scheduler_type == 'real-uniform':
             print('Using real uniform sampler')
-            self.time_scheduler = RealUniformSampler(self.sigma_max, self.sigma_min)
+            self.time_scheduler = RealUniformSampler(self.sigma_max_feat, self.sigma_min_feat)  # disregard sigma_min and sigma_max now
         else:
             raise NotImplementedError(f"unknown schedule sampler: {scheduler_type}")
 
@@ -417,6 +429,7 @@ class PPBridge(pl.LightningModule):
 
     def forward(self, batch):
         t, weights = self.time_scheduler.sample(self.batch_size, self.device)    # t size: (batch_size) also = number of graphs
+        # t, weights = self.time_scheduler.sample_zero2one(self.batch_size, self.device)    # disregard sigma_min and sigma_max now
         # print('t size:', t.size())
         # print('sampled t', t)
         losses = self.compute_losses(self.backbone, batch, t)
@@ -431,7 +444,7 @@ class PPBridge(pl.LightningModule):
     def get_sigmas(self, sigmas):
         return sigmas
     
-    def get_weightings(self, sigma):
+    def get_weightings(self, sigma, sigma_max, sigma_data, sigma_data_end, cov_xy):
         snrs = self.get_snr(sigma)
         
         if self.weight_schedule == "snr":
@@ -439,11 +452,11 @@ class PPBridge(pl.LightningModule):
         elif self.weight_schedule == "snr+1":
             weightings = snrs + 1
         elif self.weight_schedule == "karras":
-            weightings = snrs + 1.0 / self.sigma_data**2
+            weightings = snrs + 1.0 / sigma_data**2
         elif self.weight_schedule.startswith("bridge_karras"):
             if self.bridge_type == 've':
-                A = sigma**4 / self.sigma_max**4 * self.sigma_data_end**2 + (1 - sigma**2 / self.sigma_max**2)**2 * self.sigma_data**2 + 2*sigma**2 / self.sigma_max**2 * (1 - sigma**2 / self.sigma_max**2) * self.cov_xy + self.c**2 * sigma**2 * (1 - sigma**2 / self.sigma_max**2)
-                weightings = A / ((sigma/self.sigma_max)**4 * (self.sigma_data_end**2 * self.sigma_data**2 - self.cov_xy**2) + self.sigma_data**2 * self.c**2 * sigma**2 * (1 - sigma**2/self.sigma_max**2) )
+                A = sigma**4 / sigma_max**4 * sigma_data_end**2 + (1 - sigma**2 / sigma_max**2)**2 * sigma_data**2 + 2*sigma**2 / sigma_max**2 * (1 - sigma**2 / sigma_max**2) * cov_xy + self.c**2 * sigma**2 * (1 - sigma**2 / sigma_max**2)
+                weightings = A / ((sigma/sigma_max)**4 * (sigma_data_end**2 * sigma_data**2 - cov_xy**2) + sigma_data**2 * self.c**2 * sigma**2 * (1 - sigma**2/sigma_max**2) )
             
             elif self.bridge_type == 'vp':
                 
@@ -457,8 +470,8 @@ class PPBridge(pl.LightningModule):
                 c_t = -torch.expm1(logsnr_T - logsnr_t) * (2*logs_t - logsnr_t).exp()
                 # print('a_t, b_t, c_t', a_t, b_t, c_t)
 
-                A = a_t**2 * self.sigma_data_end**2 + b_t**2 * self.sigma_data**2 + 2*a_t * b_t * self.cov_xy + self.c**2 * c_t
-                weightings = A / (a_t**2 * (self.sigma_data_end**2 * self.sigma_data**2 - self.cov_xy**2) + self.sigma_data**2 * self.c**2 * c_t )
+                A = a_t**2 * sigma_data_end**2 + b_t**2 * sigma_data**2 + 2*a_t * b_t * cov_xy + self.c**2 * c_t
+                weightings = A / (a_t**2 * (sigma_data_end**2 * sigma_data**2 - cov_xy**2) + sigma_data**2 * self.c**2 * c_t )
                 # print('loss weightings', weightings)
                 
             elif self.bridge_type == 'vp_simple' or  self.bridge_type == 've_simple':
@@ -473,16 +486,16 @@ class PPBridge(pl.LightningModule):
 
         return weightings
     
-    def get_bridge_scalings(self, sigma):
+    def get_bridge_scalings(self, sigma, sigma_max, sigma_data, sigma_data_end, cov_xy):
         '''
             Compute the scalings for the bridge at a given timestep.
             The scalings are the same for feature matrix x and position matrix pos.
         '''
         if self.bridge_type == 've':
-            A = sigma**4 / self.sigma_max**4 * self.sigma_data_end**2 + (1 - sigma**2 / self.sigma_max**2)**2 * self.sigma_data**2 + 2*sigma**2 / self.sigma_max**2 * (1 - sigma**2 / self.sigma_max**2) * self.cov_xy + self.c **2 * sigma**2 * (1 - sigma**2 / self.sigma_max**2)
+            A = sigma**4 / sigma_max**4 * sigma_data_end**2 + (1 - sigma**2 / sigma_max**2)**2 * sigma_data**2 + 2*sigma**2 / sigma_max**2 * (1 - sigma**2 / sigma_max**2) * cov_xy + self.c **2 * sigma**2 * (1 - sigma**2 / sigma_max**2)
             c_in = 1 / (A) ** 0.5
-            c_skip = ((1 - sigma**2 / self.sigma_max**2) * self.sigma_data**2 + sigma**2 / self.sigma_max**2 * self.cov_xy)/ A
-            c_out =((sigma/self.sigma_max)**4 * (self.sigma_data_end**2 * self.sigma_data**2 - self.cov_xy**2) + self.sigma_data**2 *  self.c **2 * sigma**2 * (1 - sigma**2/self.sigma_max**2) )**0.5 * c_in
+            c_skip = ((1 - sigma**2 / sigma_max**2) * sigma_data**2 + sigma**2 / sigma_max**2 * cov_xy)/ A
+            c_out =((sigma/sigma_max)**4 * (sigma_data_end**2 * sigma_data**2 - cov_xy**2) + sigma_data**2 *  self.c **2 * sigma**2 * (1 - sigma**2/sigma_max**2) )**0.5 * c_in
             return c_skip, c_out, c_in
     
         elif self.bridge_type == 'vp':
@@ -496,12 +509,12 @@ class PPBridge(pl.LightningModule):
             b_t = -torch.expm1(logsnr_T - logsnr_t) * logs_t.exp()
             c_t = -torch.expm1(logsnr_T - logsnr_t) * (2*logs_t - logsnr_t).exp()
 
-            A = a_t**2 * self.sigma_data_end**2 + b_t**2 * self.sigma_data**2 + 2*a_t * b_t * self.cov_xy + self.c**2 * c_t
+            A = a_t**2 * sigma_data_end**2 + b_t**2 * sigma_data**2 + 2*a_t * b_t * cov_xy + self.c**2 * c_t
             
             
             c_in = 1 / (A) ** 0.5
-            c_skip = (b_t * self.sigma_data**2 + a_t * self.cov_xy)/ A
-            c_out =(a_t**2 * (self.sigma_data_end**2 * self.sigma_data**2 - self.cov_xy**2) + self.sigma_data**2 *  self.c **2 * c_t )**0.5 * c_in
+            c_skip = (b_t * sigma_data**2 + a_t * cov_xy)/ A
+            c_out =(a_t**2 * (sigma_data_end**2 * sigma_data**2 - cov_xy**2) + sigma_data**2 *  self.c **2 * c_t )**0.5 * c_in
             return c_skip, c_out, c_in
     
         elif self.bridge_type == 've_simple' or self.bridge_type == 'vp_simple':
@@ -519,19 +532,22 @@ class PPBridge(pl.LightningModule):
             node_mask and edge_mask should appear in the model_kwargs
         '''
 
-        c_skip, c_out, c_in = [
-            append_dims(x, h_t.ndim) for x in self.get_bridge_scalings(sigmas)
+        c_skip_h, c_out_h, c_in_h = [
+            append_dims(x, h_t.ndim) for x in self.get_bridge_scalings(sigmas, self.sigma_max_feat, self.sigma_data_feat, self.sigma_data_end_feat, self.cov_xy_feat)
+        ]
+        c_skip_x, c_out_x, c_in_x = [
+            append_dims(x, x_t.ndim) for x in self.get_bridge_scalings(sigmas, self.sigma_max_pos, self.sigma_data_pos, self.sigma_data_end_pos, self.cov_xy_pos)
         ]
         # print('c_skip, c_out, c_in', c_skip, c_out, c_in)
                
         rescaled_t = 1000 * 0.25 * torch.log(sigmas + 1e-44)
         if self.datamodule.startswith('Combined') or self.datamodule == 'QM9Dataset':
             # print(h_t.size(), rescaled_t.size(), c_in.size())
-            output_h, output_x = backbone(c_in * h_t, c_in * x_t, rescaled_t, Gt_mask, batch_info)
+            output_h, output_x = backbone(c_in_h * h_t, c_in_x * x_t, rescaled_t, Gt_mask, batch_info)
         else:
-            output_h, output_x = backbone(c_in * h_t, c_in * x_t, h_T, x_T, rescaled_t, batch_info, node_mask, edge_mask, Gt_mask, self.xT_mode)    # model_output is the output of F_theta (something between x0^hat and the noise at t)
-        denoised_h = c_out * output_h + c_skip * h_t
-        denoised_x = c_out * output_x + c_skip * x_t
+            output_h, output_x = backbone(c_in_h * h_t, c_in_x * x_t, h_T, x_T, rescaled_t, batch_info, node_mask, edge_mask, Gt_mask, self.xT_mode)    # model_output is the output of F_theta (something between x0^hat and the noise at t)
+        denoised_h = c_out_h * output_h + c_skip_h * h_t
+        denoised_x = c_out_x * output_x + c_skip_x * x_t
         return output_h, output_x, denoised_h, denoised_x   # denoised is the output of the D_theta (the predicted x0^hat)
 
     def sample_noise(self, h_start, x_start, mask=None):
@@ -559,25 +575,25 @@ class PPBridge(pl.LightningModule):
             sigmas = sigmas[batch_info]
             # print('extending selected t to', sigmas.size())
             # print(sigmas)
-        sigmas = torch.minimum(sigmas, torch.ones_like(sigmas)* self.sigma_max)
+        sigmas = torch.minimum(sigmas, torch.ones_like(sigmas)* self.sigma_max_pos)    # use sigma_max_feat, sigma_max for both feat and pos should be the same
         # print('sigmas', sigmas)
 
         losses = {}
         feat_dims = h_start.dim()
         pos_dims = x_start.dim()
 
-        def bridge_sample(x0, xT, t, dims, noise):
+        def bridge_sample(x0, xT, t, dims, noise, sigma_max):
             t = append_dims(t, dims)    # [1, 1, 2, 2, 2, ...] => [[1], [1], [2], [2], [2], ...]
-            # std_t = th.sqrt(t)* th.sqrt(1 - t / self.sigma_max)
+            # std_t = th.sqrt(t)* th.sqrt(1 - t / sigma_max)
             if self.bridge_type.startswith('ve'):
-                std_t = t* torch.sqrt(1 - t**2 / self.sigma_max**2)
-                mu_t= t**2 / self.sigma_max**2 * xT + (1 - t**2 / self.sigma_max**2) * x0
+                std_t = t* torch.sqrt(1 - t**2 / sigma_max**2)
+                mu_t= t**2 / sigma_max**2 * xT + (1 - t**2 / sigma_max**2) * x0
                 samples = (mu_t +  std_t * noise )
             elif self.bridge_type.startswith('vp'):
                 logsnr_t = vp_logsnr(t, self.beta_d, self.beta_min)
-                logsnr_T = vp_logsnr(self.sigma_max, self.beta_d, self.beta_min)
+                logsnr_T = vp_logsnr(sigma_max, self.beta_d, self.beta_min)
                 logs_t = vp_logs(t, self.beta_d, self.beta_min)
-                logs_T = vp_logs(self.sigma_max, self.beta_d, self.beta_min)
+                logs_T = vp_logs(sigma_max, self.beta_d, self.beta_min)
 
                 a_t = (logsnr_T - logsnr_t +logs_t -logs_T).exp()
                 b_t = -torch.expm1(logsnr_T - logsnr_t) * logs_t.exp()
@@ -595,8 +611,8 @@ class PPBridge(pl.LightningModule):
         if self.datamodule.startswith('Combined') or self.datamodule == 'QM9Dataset':
             # only sample the Gt part but keep the GT part the same
             # Gt_mask = batch.Gt_mask
-            h_t_sampled = bridge_sample(h_start, h_T, sigmas, feat_dims, noise_h)
-            x_t_sampled = bridge_sample(x_start, x_T, sigmas, pos_dims, noise_x)
+            h_t_sampled = bridge_sample(h_start, h_T, sigmas, feat_dims, noise_h, self.sigma_max_feat)
+            x_t_sampled = bridge_sample(x_start, x_T, sigmas, pos_dims, noise_x, self.sigma_max_pos)
             # print(h_start.size(), h_t_sampled.size(), Gt_mask_.size())
 
             if self.datamodule == 'CombinedGraphDataset':
@@ -615,13 +631,14 @@ class PPBridge(pl.LightningModule):
             # x_t = x_t.view(x_start.size(0), x_start.size(1), -1)
         else:
             Gt_mask = None
-            h_t = bridge_sample(h_start, h_T, sigmas, feat_dims, noise_h)
-            x_t = bridge_sample(x_start, x_T, sigmas, pos_dims, noise_x) 
+            h_t = bridge_sample(h_start, h_T, sigmas, feat_dims, noise_h, self.sigma_max_feat)
+            x_t = bridge_sample(x_start, x_T, sigmas, pos_dims, noise_x, self.sigma_max_pos) 
         _, _, denoised_x, denoised_pos = self.denoise(backbone, sigmas, h_t, x_t, h_T, x_T, node_mask=node_mask, edge_mask=edge_mask, Gt_mask=Gt_mask.squeeze(-1), batch_info=batch_info)
 
-        weights = self.get_weightings(sigmas)
-        x_weights =  append_dims((weights), feat_dims)
-        pos_weights = append_dims((weights), pos_dims)  
+        x_weights = self.get_weightings(sigmas, self.sigma_max_feat, self.sigma_data_feat, self.sigma_data_end_feat, self.cov_xy_feat)
+        pos_weights = self.get_weightings(sigmas, self.sigma_max_pos, self.sigma_data_pos, self.sigma_data_end_pos, self.cov_xy_pos)
+        x_weights =  append_dims((x_weights), feat_dims)
+        pos_weights = append_dims((pos_weights), pos_dims)  
         # print(x_weights==pos_weights)
         if self.datamodule.startswith('Combined') or self.datamodule == 'QM9Dataset':
             Gt_mask_ = Gt_mask.squeeze(-1)
@@ -644,33 +661,34 @@ class PPBridge(pl.LightningModule):
             # print(Gt_mask_.sum())
             # print(denoised_x[Gt_mask_].size(), original_h.size())
 
-            # loss_x_mse = (denoised_x[Gt_mask_] - original_h) ** 2
-            loss_x_ce = F.cross_entropy(denoised_x[Gt_mask_], original_h.argmax(dim=-1), reduction='none').unsqueeze(-1)
+            loss_x_mse = (denoised_x[Gt_mask_] - original_h) ** 2
+            # loss_x_ce = F.cross_entropy(denoised_x[Gt_mask_], original_h.argmax(dim=-1), reduction='none').unsqueeze(-1)
             loss_pos_mse = (denoised_pos[Gt_mask_] - original_x) ** 2
             # print(denoised_x[Gt_mask_].size(), original_h.argmax(dim=-1).size(), loss_x_ce.size())
 
-            # losses["x_mse"] = mean_flat(loss_x_mse)      
+            # losses["x_mse"] = mean_flat(loss_x_mse)   
+            losses['x_mse'] = scatter_mean_flat(loss_x_mse, batch_info[Gt_mask_])   
             # losses['x_ce'] = mean_flat(loss_x_ce)
-            losses['x_ce'] = scatter_mean_flat(loss_x_ce, batch_info[Gt_mask_])
+            # losses['x_ce'] = scatter_mean_flat(loss_x_ce, batch_info[Gt_mask_])
 
             # losses['pos_mse'] = mean_flat((denoised_pos[Gt_mask_] - original_x) ** 2)
             losses["pos_mse"] = scatter_mean_flat(loss_pos_mse, batch_info[Gt_mask_])
 
             # losses["weighted_x_mse"] = mean_flat(x_weights[Gt_mask_] * loss_x_mse)
-            # print('loss_x_ce', loss_x_ce.size(), x_weights[Gt_mask_].size())
+            losses["weighted_x_mse"] = scatter_mean_flat(x_weights[Gt_mask_] * loss_x_mse, batch_info[Gt_mask_])
             # losses['weighted_x_ce'] = mean_flat(x_weights[Gt_mask_] * loss_x_ce)
-            losses['weighted_x_ce'] = scatter_mean_flat(x_weights[Gt_mask_] * loss_x_ce, batch_info[Gt_mask_])
+            # losses['weighted_x_ce'] = scatter_mean_flat(x_weights[Gt_mask_] * loss_x_ce, batch_info[Gt_mask_])
 
             # losses["weighted_pos_mse"] = mean_flat(pos_weights[Gt_mask_] * (denoised_pos[Gt_mask_] - original_x) ** 2)
             losses["weighted_pos_mse"] = scatter_mean_flat(pos_weights[Gt_mask_] * loss_pos_mse, batch_info[Gt_mask_])
 
-            # losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_mse, dim=-1) + 
-            #                                    torch.sum(pos_weights[Gt_mask_] * loss_pos_mse, dim=-1),
-            #                                    batch_info[Gt_mask_])
-            
-            losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_ce, dim=-1) + 
+            losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_mse, dim=-1) + 
                                                torch.sum(pos_weights[Gt_mask_] * loss_pos_mse, dim=-1),
                                                batch_info[Gt_mask_])
+            
+            # losses['loss'] = scatter_flat(self.loss_x_weight * torch.sum(x_weights[Gt_mask_] * loss_x_ce, dim=-1) + 
+            #                                    torch.sum(pos_weights[Gt_mask_] * loss_pos_mse, dim=-1),
+            #                                    batch_info[Gt_mask_])
 
         else:
             losses["x_mse"] = mean_flat((denoised_x - h_start) ** 2)      # x should be the atom type one hot encoding, think twice of mse loss
@@ -736,7 +754,8 @@ class PPBridge(pl.LightningModule):
         if self.use_lr_scheduler:
             lr_scheduler = instantiate_from_config(self.lr_scheduler_config)
 
-            print("Setting up LambdaLR scheduler...")
+            # print("Setting up LambdaLR scheduler...")
+            print("Setting up ExponentialLR scheduler...")
             lr_scheduler = [
                 {
                     'scheduler': ExponentialLR(optimizer, gamma=0.95), # LambdaLR(optimizer, lr_lambda=lr_scheduler.schedule),
