@@ -79,3 +79,7 @@ class RealUniformSampler:
     def sample(self, batch_size, device):
         ts = th.rand(batch_size).to(device) *(self.sigma_max - self.sigma_min) + self.sigma_min
         return ts, th.ones_like(ts)
+    
+    def sample_zero2one(self, batch_size, device):
+        ts = th.rand(batch_size).to(device) * (1 - 1e-5) 
+        return ts, th.ones_like(ts)
