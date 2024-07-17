@@ -353,7 +353,7 @@ class EGNN_combined_graph(nn.Module):
         # h = h.view(bs, n_node, -1)
         h = self.embedding_out(h)
         h = h * Gt_mask[:, None] + h_ * (~Gt_mask)[:, None]
-        h = F.softmax(h, dim=-1)
+        # h = F.softmax(h, dim=-1)
         # outputs = {'x': x, 'h': h}
         # if return_all:
         #     outputs.update({'all_x': all_x, 'all_h': all_h})
