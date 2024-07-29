@@ -9,6 +9,8 @@ import torch
 import torch.nn.functional as F
 from omegaconf import OmegaConf
 from rdkit import Chem
+from rdkit.Chem import AllChem
+from rdkit.Chem.rdForceFieldHelpers import UFFOptimizeMolecule
 from tqdm import tqdm
 from data_processing.paired_data import PharmacophoreDataset, CombinedGraphDataset
 from data_processing.qm9_data import MAP_ATOM_TYPE_AROMATIC_TO_INDEX
@@ -20,7 +22,7 @@ from script_utils import load_data, load_qm9_data
 
 
 @torch.no_grad()
-def reconstruct(x, h, Gt_mask, batch_info, ligand_names, mol_save_path, datamodule='QM9Dataset', softmax_h=True, remove_H=False, basic_mode=False):
+def reconstruct(x, h, Gt_mask, batch_info, ligand_names, mol_save_path, datamodule='QM9Dataset', softmax_h=True, remove_H=False, basic_mode=False, optimization=True):
     if datamodule == 'QM9Dataset':
         index_to_atom_type_aromatic = {v: k for k, v in MAP_ATOM_TYPE_AROMATIC_TO_INDEX.items()}
     num_graphs = max(batch_info).item() + 1
@@ -59,6 +61,10 @@ def reconstruct(x, h, Gt_mask, batch_info, ligand_names, mol_save_path, datamodu
         try:
             mol = reconstruct_from_generated(pos, atom_type, atom_aromatic, basic_mode=basic_mode)
             mol_name = ligand_names[i]
+            if optimization:
+                mol = Chem.AddHs(mol, addCoords = True)
+                AllChem.EmbedMolecule(mol)
+                UFFOptimizeMolecule(mol)
             with Chem.SDWriter(os.path.join(mol_save_path, mol_name + '.sdf')) as w:
                 w.write(mol)
             success += 1
@@ -68,15 +74,15 @@ def reconstruct(x, h, Gt_mask, batch_info, ligand_names, mol_save_path, datamodu
     return success
 
 
-def sample(config_file, ckpt_path, save_path, steps=40, device='cuda:0', remove_H=False, basic_mode=False):
+def sample(config_file, ckpt_path, save_path, steps=40, device='cuda:0', remove_H=False, basic_mode=False, optimization=True):
     config = OmegaConf.load(config_file)
     # save_path = os.path.join(save_path, config.model.denoiser.bridge_type)
     os.makedirs(save_path, exist_ok=True)
     if not basic_mode:
-        rec_mol_path = os.path.join(save_path, 'reconstructed_mols_aromatic_mode')
+        rec_mol_path = os.path.join(save_path, 'reconstructed_mols_aromatic_mode_optimized' if optimization else 'reconstructed_mols_aromatic_mode')
         gen_res_file = os.path.join(save_path, 'generation_res_aromatic_mode.pkl')
     else:
-        rec_mol_path = os.path.join(save_path, 'reconstructed_mols')
+        rec_mol_path = os.path.join(save_path, 'reconstructed_mols_optimized' if optimization else 'reconstructed_mols')
         gen_res_file = os.path.join(save_path, 'generation_res.pkl')
     os.makedirs(rec_mol_path, exist_ok=True)
     sampler = PPBridgeSampler(config, ckpt_path, device)
@@ -104,8 +110,8 @@ def sample(config_file, ckpt_path, save_path, steps=40, device='cuda:0', remove_
         with torch.no_grad():
             _, _, Gt_mask, batch_info = sampler.preprocess(batch.target_pos, batch.target_x, node_mask=node_mask, Gt_mask=batch.Gt_mask, batch_info=batch.batch, device=device)  # Gt_mask and batch_info are for reconstruction
             x, x_traj, h, h_traj, nfe = sampler.sample(batch.target_pos, batch.target_x, steps, node_mask=node_mask, Gt_mask=batch.Gt_mask, batch_info=batch.batch, 
-                                                       sigma_min=config.model.denoiser.sigma_min, sigma_max=config.model.denoiser.sigma_max, churn_step_ratio=0.33, device=device)
-        success += reconstruct(x, h, Gt_mask, batch.batch, batch.ligand_name, rec_mol_path, datamodule, remove_H=remove_H, basic_mode=basic_mode)
+                                                       sigma_min=config.data.feat.sigma_min, sigma_max=config.data.feat.sigma_max, churn_step_ratio=0.33, device=device)
+        success += reconstruct(x, h, Gt_mask, batch.batch, batch.ligand_name, rec_mol_path, datamodule, remove_H=remove_H, basic_mode=basic_mode, optimization=optimization)
         all_x.append(x)
         all_x_traj.append(x_traj)
         all_h.append(h)
@@ -128,7 +134,7 @@ if __name__ == '__main__':
     parser.add_argument('--config', '-c', type=str, default='config/vp_bridge.yml', help='Path to the configuration file')
     parser.add_argument('--ckpt', '-k', type=str, default='lightning_logs/vp_bridge_2024-05-05_23_23_05.637117/epoch=10-val_loss=1815365.00.ckpt', help='Path to the checkpoint file')
     parser.add_argument('--save', '-s', type=str, default='../generation_results', help='Path to save the reconstructed molecules')
-    parser.add_argument('--steps', type=int, default=500, help='Number of steps for sampling')
+    parser.add_argument('--steps', type=int, default=200, help='Number of steps for sampling')
     parser.add_argument('--gpu', '-g', type=int, default=0, help='Which GPU to use')
     parser.add_argument('--remove_H', '-r', action='store_true', help='Whether to remove Hydrogens in the reconstruction')
     parser.add_argument('--basic_mode', '-b', action='store_true', help='Whether to use the basic mode for reconstruction, dont add this if you want to consider aromaticity')
