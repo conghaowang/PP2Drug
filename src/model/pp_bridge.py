@@ -760,7 +760,8 @@ class PPBridge(pl.LightningModule):
                 {
                     'scheduler': ExponentialLR(optimizer, gamma=0.95), # LambdaLR(optimizer, lr_lambda=lr_scheduler.schedule),
                     'interval': 'epoch',
-                    'frequency': 1,
+                    'frequency': 5,
+                    'last_epoch': 450,
                     # 'gradient_clip_val': 0.5, 
                     # 'gradient_clip_algorithm': 'norm'  # Choose 'norm' or 'value'
                 }]

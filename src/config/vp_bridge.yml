@@ -42,7 +42,7 @@ training:
   total_training_steps: 10000000
   learning_rate: 0.01   # now using decay lr scheduler, so start from a high rate
   lr_anneal_steps: 0
-  max_epochs: 100
+  max_epochs: 1000
   use_lr_scheduler: true
   lr_scheduler_config: # 10000 warmup steps
     target: model.utils.lr_scheduler.LambdaLinearScheduler
