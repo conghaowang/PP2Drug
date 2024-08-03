@@ -489,7 +489,7 @@ def reconstruct_from_generated(xyz, atomic_nums, aromatic=None, basic_mode=True)
     mol, atoms = make_obmol(xyz, atomic_nums)
     fixup(atoms, mol, indicators)
 
-    connect_the_dots(mol, atoms, indicators, covalent_factor=1.3)
+    connect_the_dots(mol, atoms, indicators, covalent_factor=2.0)
     fixup(atoms, mol, indicators)
 
     mol.AddPolarHydrogens()
