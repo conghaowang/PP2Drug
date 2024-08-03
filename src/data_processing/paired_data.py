@@ -4,6 +4,7 @@ from torch_geometric.data import Data, Dataset, InMemoryDataset
 from torch_geometric.utils import to_dense_batch
 import torch
 import numpy as np
+from sklearn.cluster import DBSCAN, HDBSCAN
 import glob
 import os
 import random
@@ -332,6 +333,60 @@ class PharmacophoreDataset(InMemoryDataset):
         pos -= CoM
         return pos
     
+    def cluster_non_pp(self, pos, atom_in_pp):
+        non_pp_atom_positions = []
+        non_pp_atom_pos_dict = []
+
+        for i in range(pos.size(0)):
+            if i not in atom_in_pp:
+                # dist_i = np.zeros(num_pp)
+                # for j in range(num_pp):
+                #     dist_i[j] = np.linalg.norm(atom_positions[i] - pp_positions[j])
+                non_pp_atom_positions.append(pos[i])
+                non_pp_atom_pos_dict.append({'id':i, 'pos':pos[i]})
+
+        non_pp_atom_positions = torch.tensor(np.array(non_pp_atom_positions))
+        # print(non_pp_atom_positions.size())
+
+        if non_pp_atom_positions.size(0) == 1:
+            return {0: [non_pp_atom_pos_dict[0]['id']]}, non_pp_atom_positions
+
+        clustering_model = HDBSCAN(min_cluster_size=2)
+        clustering = clustering_model.fit(non_pp_atom_positions)
+        non_pp_atom_labels = clustering.labels_
+        max_label = np.max(non_pp_atom_labels)
+        
+        # if there are some atoms that are not clustered, we assign them to a new single-atom cluster
+        for i in range(len(non_pp_atom_labels)):
+            if non_pp_atom_labels[i] == -1:
+                non_pp_atom_labels[i] = max_label + 1
+                max_label += 1
+
+        non_pp_groups = np.unique(non_pp_atom_labels)
+        non_pp_group_center_positions = torch.zeros((len(non_pp_groups), 3))
+        non_pp_atom_indices = {label: [] for label in non_pp_groups}
+
+        for group in non_pp_groups:
+            # nodes: the index in the non_pp_atom_positions matrix
+            nodes = np.where(non_pp_atom_labels==group)[0]
+            # print(nodes)
+
+            # atoms: the index in the original ligand
+            atoms = []
+            for node in nodes:
+                # print(node)
+                atoms.append(non_pp_atom_pos_dict[int(node)]['id'])
+            # print(atoms)
+            non_pp_atom_indices[group] = atoms
+            
+            positions = non_pp_atom_positions[nodes]
+            # print(positions.size())
+            center_pos = torch.mean(positions, dim=0)
+            # print(center_pos)
+            non_pp_group_center_positions[group] = center_pos
+
+        return non_pp_atom_indices, non_pp_group_center_positions
+    
     def compute_target(self, x, pos, pp_atom_indices, pp_positions, pp_types, pp_index, center_tensor, noise_std=0.01):
         '''
             Compute the target of the diffusion bridge, which is each atom's feat/pos destination regarding its pharmacophore membership
@@ -346,17 +401,29 @@ class PharmacophoreDataset(InMemoryDataset):
         # print(self.pp_atom_indices)
         for atom_indices in pp_atom_indices:
             atom_in_pp += atom_indices
+        
+        if len(atom_in_pp) != x.size(0):
+            # some atoms are not in any pharmacophore, we cluster them and set their target pos to the cluster center
+            non_pp_atom_indices, non_pp_group_center_positions = self.cluster_non_pp(pos, atom_in_pp)
+        else:
+            # all atoms are in pharmacophores
+            non_pp_atom_indices = {}
+            non_pp_group_center_positions = None
         for i in range(x.size(0)):
             if i not in atom_in_pp:  # if the atom is not in any pharmacophore, we set its target type to Linker:0 and target position to CoM plus a bit noise
                 target_x[i] = torch.nn.functional.one_hot(torch.tensor([0]), num_classes=pp_types.size(1)).to(torch.float)
                 # target_pos[i] = torch.zeros(pos.size(1))
-                target_pos[i] = center_tensor + torch.randn_like(center_tensor) # * noise_std
+                # target_pos[i] = center_tensor + torch.randn_like(center_tensor) # * noise_std
                 node_pp_index[i] = -1
+                for j, atom_indices in non_pp_atom_indices.items():
+                    if i in atom_indices:
+                        target_pos[i] = non_pp_group_center_positions[j] + torch.randn_like(non_pp_group_center_positions[j]) * noise_std
+                        break
             else:  # if the atom is in a pharmacophore, we set its target type to the pharmacophore type and target position to the pharmacophore position
                 for j, atom_indices in enumerate(pp_atom_indices):
                     if i in atom_indices:
                         target_x[i] = pp_types[j]
-                        target_pos[i] = pp_positions[j] + torch.randn_like(pp_positions[j]) # * noise_std
+                        target_pos[i] = pp_positions[j] + torch.randn_like(pp_positions[j]) * noise_std
                         node_pp_index[i] = j    # = pp_index[j]
                         break
         
