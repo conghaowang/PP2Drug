@@ -46,10 +46,10 @@ data:
   max_node_num: 86
   coord_dim: 3
   module: CombinedSparseGraphDataset # CombinedSparseGraphDataset # CombinedGraphDataset # PharmacophoreDataset
-  aromatic: true
+  aromatic: false
   feat:
-    sigma_data: 0.5
-    sigma_data_end: 0.5
+    sigma_data: 0.7
+    sigma_data_end: 1.0
     sigma_max: 1
     sigma_min: 0.0001
   pos:

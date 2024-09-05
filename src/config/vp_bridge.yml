@@ -63,8 +63,8 @@ data:
   module: CombinedSparseGraphDataset # CombinedSparseGraphDataset # CombinedGraphDataset # PharmacophoreDataset
   aromatic: false
   feat:
-    sigma_data: 0.5
-    sigma_data_end: 0.5
+    sigma_data: 0.3
+    sigma_data_end: 0.7
     sigma_max: 1
     sigma_min: 0.0001
   pos:
