@@ -22,7 +22,7 @@ from tqdm import tqdm
 from data_processing.ligand import Ligand
 from data_processing.utils import sample_probability, PP_TYPE_MAPPING
 from script_utils import load_qm9_data
-from utils import extract_pp, pp_match
+from utils_eval import extract_pp, pp_match, save_matching_scores, plot_matching_scores
 
 
 def load_generated_mols(generated_path):
@@ -66,25 +66,6 @@ def compute_matching_scores(generated_path, pp_info, threshold=1.5):
         score_dict[smi] = score
 
     return match_dict, score_dict
-
-
-def save_matching_scores(match_dict, score_dict, save_path):
-    with open(save_path + '_matches.pkl', 'wb') as f:
-        pickle.dump(match_dict, f)
-        # pickle.dump(score_dict, f)
-    score_df = pd.DataFrame.from_dict(score_dict, orient='index', columns=['score'])
-    score_df.to_csv(save_path + '_scores.csv')
-
-
-def plot_matching_scores(score_dict, save_path):
-    scores = np.array([v for v in score_dict.values()])
-    scores = np.clip(scores, 0, 1)
-    ax = sns.histplot(scores, bins=15)
-    # ax.bar_label('{:.2f} %'.format(ax.containers[0]))
-    ax.set_title('Pharmacophore Matching Scores')
-    ax.set_xlabel('Matching Score')
-    ax.set_ylabel('Frequency')
-    plt.savefig(save_path + '_score_dist.png', dpi=300)
 
 
 if __name__ == '__main__':

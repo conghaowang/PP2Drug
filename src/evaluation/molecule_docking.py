@@ -5,7 +5,7 @@ from rdkit import Chem
 from tqdm import tqdm
 import re
 import subprocess
-from utils import build_pdb_dict
+from utils_eval import build_pdb_dict
 
 
 def molecule_docking(res_path, gen_files, pdb_rev_dict, root, aromatic=True, gpu=0):
