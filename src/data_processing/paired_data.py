@@ -240,7 +240,8 @@ class PharmacophoreDataset(InMemoryDataset):
         self.save(data_list, self.processed_paths[0])
         self.save_pp_info(pp_info)
 
-    def extract_atom_features(self, mol, num_class, aromatic=False):
+    @staticmethod
+    def extract_atom_features(mol, num_class, aromatic=False):
         '''
             calculate:
                 h: encoding of atom type 
@@ -284,7 +285,8 @@ class PharmacophoreDataset(InMemoryDataset):
         edge_mask = edge_mask.bool()
         return edge_mask
 
-    def extract_pp(self, ligand, num_class):
+    @staticmethod
+    def extract_pp(ligand, num_class):
         pp_type_mapping = PP_TYPE_MAPPING
 
         atom_indice_list = []
@@ -324,8 +326,13 @@ class PharmacophoreDataset(InMemoryDataset):
             sum_mass += mass
         CoM = sum_pos / sum_mass
         return CoM
+
+    @staticmethod
+    def compute_atom_center(atom_positions):
+        return torch.mean(atom_positions, dim=0)
     
-    def compute_pp_center(self, pp_positions):
+    @staticmethod
+    def compute_pp_center(pp_positions):
         return torch.mean(pp_positions, dim=0)
     
     def CoM2zero(self, pos, CoM):
@@ -333,7 +340,8 @@ class PharmacophoreDataset(InMemoryDataset):
         pos -= CoM
         return pos
     
-    def cluster_non_pp(self, pos, atom_in_pp):
+    @staticmethod
+    def cluster_non_pp(pos, atom_in_pp):
         non_pp_atom_positions = []
         non_pp_atom_pos_dict = []
 
@@ -648,7 +656,8 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
         # self.save()
         self.save_pp_info(pp_info, self._split)
 
-    def combine_target(self, x, pos, target_x, target_pos):
+    @staticmethod
+    def combine_target(x, pos, target_x, target_pos):
         N = x.size(0)
         x = torch.cat((x, target_x), dim=0)
         pos = torch.cat((pos, target_pos), dim=0)
@@ -656,10 +665,110 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
         Gt_mask[:N] = True
         return x, pos, Gt_mask
 
-    def make_edge_mask(self, N):
+    @staticmethod
+    def make_edge_mask(N):
         edge_mask = torch.ones((N, N), dtype=torch.bool)
         edge_mask = edge_mask.view(1, N * N)
         return edge_mask
+    
+
+class CombinedUnconditionalDataset(CombinedSparseGraphDataset):
+    def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None, aromatic=False):
+        self.root = root
+        self._split = split
+        self.aromatic = aromatic
+        super(CombinedUnconditionalDataset, self).__init__(root, split, transform, pre_transform, pre_filter, aromatic=aromatic)
+        self.load(self.processed_paths[0])
+
+    @property
+    def processed_file_names(self):
+        assert self._split in ['train', 'valid', 'test', 'all']
+        if self.aromatic:
+            processed_file_name = f'{self._split}_aromatic_unconditional.pt'
+        else:
+            processed_file_name = f'{self._split}_unconditional.pt'
+
+        return [processed_file_name]
+    
+    def compute_target(self, x, pos, center_tensor, noise_std=0.01):
+        '''
+            Compute the target of the diffusion bridge, which is each atom's feat/pos destination regarding its pharmacophore membership
+            Should we include a bit noise when initializing the target pos?
+            TODO: We don't move the CoM to zero during data preparation now, should initiate the target pos as CoM rather than zeros!!! But then how do we init the target pos during sampling stage?
+        '''
+
+        target_x = torch.rand_like(x)
+        target_pos = center_tensor + torch.rand_like(pos)
+        node_pp_index = torch.zeros(x.size(0), dtype=torch.long)
+
+        return target_x, target_pos, node_pp_index
+
+    def process(self):
+        data_list = []
+        # print(self.raw_file_names)
+        # print(self.raw_paths)
+        # max_N = self.get_max_N()
+        # max_N = self._max_N
+        for raw_path in tqdm(self.raw_paths):
+            filename = raw_path.split('/')[-1].split('.')[0]
+            # print(raw_path)
+            rdmol = Chem.MolFromMolFile(raw_path, removeHs=False, sanitize=True)
+            pbmol = next(pybel.readfile("sdf", raw_path))
+            # rdmol = Chem.AddHs(rdmol)
+            try:
+                rdmol = Chem.AddHs(rdmol)
+                ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None)
+                rdmol = ligand.rdmol_noH
+            except Exception as e:
+                print(f'Ligand {raw_path} init failed')
+                print(e)
+                continue
+            # print('Ligand init success')
+            # for atom in rdmol.GetAtoms():
+            #     print(atom.GetSymbol())
+
+            if self.aromatic:
+                num_feat_class = len(MAP_ATOM_TYPE_AROMATIC_TO_INDEX.keys())
+            else:
+                num_feat_class = len(ATOM_TYPE_MAPPING.keys())
+            try:
+                x, x_aromatic, atomic_numbers, pos, num_nodes = self.extract_atom_features(rdmol, num_feat_class, aromatic=self.aromatic)
+                # edge_mask = self.make_edge_mask(num_nodes)
+            except KeyError as e:  # some elements are not considered, skip such ligands
+                print(f'Ligand {raw_path} contains rare elements: {e}')
+                continue
+            # try:
+            #     pp_atom_indices, pp_positions, pp_types, pp_index = self.extract_pp(ligand, num_feat_class)
+            #     assert pp_positions.size(1) == 3
+            # except Exception as e:
+            #     print(raw_path, 'extract pp failed')
+            #     print(e)
+            #     continue
+
+            center_tensor = self.compute_atom_center(pos)
+            assert center_tensor.size(0) == 3
+            # pp_center_tensor = self.compute_pp_center(pp_positions)
+            # print(pp_center_tensor.size())
+            # assert pp_center_tensor.size(0) == 3
+
+            if self.aromatic:
+                feat = x_aromatic
+            else:
+                feat = x
+            target_x, target_pos, node_pp_index = self.compute_target(feat, pos, center_tensor)
+            x_ctr, pos_ctr, Gt_mask = self.combine_target(feat, pos, target_x, target_pos)
+            target_x_ctr, target_pos_ctr, _ = self.combine_target(target_x, target_pos, target_x, target_pos)
+            edge_mask_ctr = self.make_edge_mask(num_nodes * 2)
+            node_mask_ctr = torch.ones([1, num_nodes * 2], dtype=torch.bool)
+
+            data = Data(x=x_ctr, pos=pos_ctr, target_x=target_x_ctr, target_pos=target_pos_ctr, Gt_mask=Gt_mask, ligand_name=filename)
+            data_list.append(data)
+        # data, slices = self.collate(data_list)
+        # torch.save((data, slices), self.processed_paths[0])
+        # self.data, self.slices = self.collate(data_list)
+        # for data in data_list:
+        #     print(data)
+        self.save(data_list, self.processed_paths[0])
 
 
 def load_dataset(module, root, split, aromatic=False):
@@ -679,7 +788,7 @@ if __name__ == '__main__':
     aromatic = sys.argv[1] == 'aromatic'
     print(f'aromatic: {aromatic}')
 
-    module = CombinedSparseGraphDataset # CombinedGraphDataset # PharmacophoreDataset
+    module = CombinedUnconditionalDataset # CombinedSparseGraphDataset # CombinedGraphDataset # PharmacophoreDataset
     root = '../../data/cleaned_crossdocked_data'
     train_dataset = load_dataset(module, root, split='train', aromatic=aromatic)
     valid_dataset = load_dataset(module, root, split='valid', aromatic=aromatic)

@@ -115,7 +115,8 @@ class Ligand():
         out = cls(pbmol, rdmol, atom_positions, conformer_axis)
         return out
 
-    def remove_overlapping_pp(self, pp_list):
+    @staticmethod
+    def remove_overlapping_pp(pp_list):
         # Sort pharmacophores by size in descending order
         pp_list.sort(key=lambda x:len(x[1]), reverse=True)
 
