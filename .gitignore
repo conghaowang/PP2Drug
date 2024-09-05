@@ -167,3 +167,5 @@ generation_results/
 docking_res/
 src/dummy.py
 src/test_env.py
+src/evaluation/ligand_based
+src/evaluation/structure_based
