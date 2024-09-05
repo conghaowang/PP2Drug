@@ -307,7 +307,7 @@ class PPBridge(pl.LightningModule):
                 # print(x0.size(), h0.size(), xT.size(), hT.size(), x0.device, Gt_mask.size())
                 else:
                     raise NotImplementedError(f"Unknown xT_mode: {self.xT_mode}")
-            elif self.datamodule == 'CombinedSparseGraphDataset' or self.datamodule == 'QM9Dataset':
+            elif self.datamodule == 'CombinedSparseGraphDataset' or self.datamodule == 'QM9Dataset' or self.datamodule == 'CombinedUnconditionalDataset':
                 # data is already in sparse format
                 
                 # x0 = x0[0]
@@ -375,7 +375,7 @@ class PPBridge(pl.LightningModule):
             node_mask: mask out sparse nodes
         '''
 
-        if self.datamodule == 'CombinedSparseGraphDataset' or self.datamodule == 'QM9Dataset':
+        if self.datamodule == 'CombinedSparseGraphDataset' or self.datamodule == 'QM9Dataset' or self.datamodule == 'CombinedUnconditionalDataset':
             # information below is not useful for sparse graphs
             num_nodes = batch.x.size(0)
             # print(num_nodes)
@@ -643,7 +643,7 @@ class PPBridge(pl.LightningModule):
         if self.datamodule.startswith('Combined') or self.datamodule == 'QM9Dataset':
             Gt_mask_ = Gt_mask.squeeze(-1)
 
-            if self.datamodule == 'CombinedSparseGraphDataset' or self.datamodule == 'QM9Dataset':
+            if self.datamodule == 'CombinedSparseGraphDataset' or self.datamodule == 'QM9Dataset' or self.datamodule == 'CombinedUnconditionalDataset':
                 # center the original x to zero
                 # original_x, original_h = batch.pos[Gt_mask_], batch.x[Gt_mask_]
                 # original_x = center2zero(original_x, mean_dim=0)

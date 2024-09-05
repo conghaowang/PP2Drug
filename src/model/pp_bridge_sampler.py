@@ -50,7 +50,7 @@ class PPBridgeSampler(PPBridge):
                 hT = torch.cat(hT_, dim=0)
                 Gt_mask = torch.cat(sparse_Gt_mask, dim=0)
                 batch_info = torch.cat(batch_all, dim=0)
-            elif self.bridge_model.datamodule == 'CombinedSparseGraphDataset' or self.bridge_model.datamodule == 'QM9Dataset':
+            elif self.bridge_model.datamodule == 'CombinedSparseGraphDataset' or self.bridge_model.datamodule == 'QM9Dataset' or self.bridge_model.datamodule == 'CombinedUnconditionalDataset':
                 Gt_mask = Gt_mask_[0].squeeze(-1)
                 node_mask = node_mask[0]
                 xT = center2zero_sparse_graph(xT, Gt_mask, batch_info)
