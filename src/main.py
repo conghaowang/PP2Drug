@@ -37,7 +37,10 @@ def main(args):
             config.model.backbone.feature_size = 12
             print(f'Loading {datamodule} data with aromatic features')
         else:
-            config.model.backbone.feature_size = 8
+            if datamodule == 'CombinedUnconditionalDataset':
+                config.model.backbone.feature_size = 7
+            else:
+                config.model.backbone.feature_size = 8
             print(f'Loading {datamodule} data without aromatic features')
 
     model = PPBridge(config)

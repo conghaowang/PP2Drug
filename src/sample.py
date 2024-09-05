@@ -101,7 +101,7 @@ def sample(config_file, ckpt_path, save_path, steps=40, device='cuda:0', remove_
     all_x, all_x_traj, all_h, all_h_traj, all_nfe = [], [], [], [], []
     for batch in tqdm(test_loader):
         batch = batch.to(device)
-        if datamodule == 'CombinedSparseGraphDataset' or datamodule == 'QM9Dataset':
+        if datamodule == 'CombinedSparseGraphDataset' or datamodule == 'QM9Dataset' or datamodule == 'CombinedUnconditionalDataset':
             node_mask = torch.ones([1, batch.x.size(0)], dtype=torch.bool, device=device)
             # ligand_names = batch.smiles
         else:
