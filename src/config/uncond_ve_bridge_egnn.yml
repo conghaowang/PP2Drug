@@ -1,21 +1,21 @@
 model:
   denoiser:
-    bridge_type: 'vp'
+    bridge_type: 've'
     beta_d: 2
     beta_min: 0.1
-    schedule_sampler: 'real-uniform' # 'uniform' # 'real-uniform'
+    schedule_sampler: 'real-uniform'
     use_ema: true
     ema_decay: 0.999
     weight_decay: 1e-12
-    weight_schedule: 'bridge_karras' # 'uniform' # 'bridge_karras'
+    weight_schedule: 'uniform' # 'uniform'
     loss_x_weight: 1e+1
 
   backbone: 
     type: 'EGNN'
     feature_size: 8 # 12
     num_layers: 10
-    hidden_size: 256
-    time_cond: True # False
+    hidden_size: 128
+    time_cond: True
     xT_type: 'pp' # 'noise' # 'none' # 'pp'
     xT_mode: 'concat_graph' # 'concat_graph' # 'none'
 
@@ -25,9 +25,9 @@ training:
   save_interval: 1000
   test_interval: 1000
   total_training_steps: 10000000
-  learning_rate: 0.01   # now using decay lr scheduler, so start from a high rate
+  learning_rate: 0.01
   lr_anneal_steps: 0
-  max_epochs: 1000
+  max_epochs: 100
   use_lr_scheduler: true
   lr_scheduler_config: # 10000 warmup steps
     target: model.utils.lr_scheduler.LambdaLinearScheduler
@@ -45,15 +45,15 @@ data:
   root: ../data/cleaned_crossdocked_data
   max_node_num: 86
   coord_dim: 3
-  module: CombinedSparseGraphDataset # CombinedSparseGraphDataset # CombinedGraphDataset # PharmacophoreDataset
+  module: CombinedUnconditionalDataset #CombinedSparseGraphDataset # CombinedGraphDataset # PharmacophoreDataset
   aromatic: true
   feat:
     sigma_data: 0.7
     sigma_data_end: 1.0
-    sigma_max: 1
-    sigma_min: 0.0001
+    sigma_max: 80
+    sigma_min: 0.002
   pos:
     sigma_data: 0.1
     sigma_data_end: 0.3
-    sigma_max: 1
-    sigma_min: 0.0001
+    sigma_max: 80
+    sigma_min: 0.002
