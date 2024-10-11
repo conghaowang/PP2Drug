@@ -45,7 +45,7 @@ def compute_matching_scores(generated_path, ref_pp_info, threshold=1.5):
         pbmol = next(pybel.readfile("sdf", mol_path))
         try:
             rdmol = Chem.AddHs(rdmol)
-            ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None, filtering=False)
+            ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None, filtering=False, preprocess=False)
         except:
             print('ligand init failed')
             continue
@@ -77,6 +77,7 @@ def compute_center(combined_pos, Gt_mask):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--root_path', '-r', type=str, default='structure_based/', help='Path to the generated molecules')
+    parser.add_argument('--bridge_type', '-bt', type=str, default='vp', help='Type of bridge to use')
     parser.add_argument('--aromatic', '-a', action='store_true', help='Whether the data is aromatic')
     parser.add_argument('--ligand_name', '-l', type=str, required=True, help='Name of the ligand')
     args = parser.parse_args()
@@ -84,7 +85,7 @@ if __name__ == '__main__':
 
     # folder_name = ligand_name[ligand_name.rfind('rec')+4:ligand_name.rfind('rec')+8]
     folder_name = ligand_name
-    generated_path = os.path.join(args.root_path, folder_name, 'aromatic' if args.aromatic else 'basic')
+    generated_path = os.path.join(args.root_path, args.bridge_type, folder_name, 'aromatic' if args.aromatic else 'basic')
     test_data = torch.load(os.path.join(args.root_path, folder_name, ligand_name + '_aromatic' + '.pt' if args.aromatic else ligand_name + '.pt'))
     center = compute_center(test_data['target_pos'], test_data['Gt_mask'])
 
@@ -96,5 +97,5 @@ if __name__ == '__main__':
     # print(pp_info['pp_positions'])
 
     match_dict, score_dict = compute_matching_scores(generated_path, pp_info, threshold=1.5)
-    save_matching_scores(match_dict, score_dict, os.path.join(args.root_path, folder_name, 'aromatic' if args.aromatic else 'basic'))
-    plot_matching_scores(score_dict, os.path.join(args.root_path, folder_name, 'aromatic' if args.aromatic else 'basic'))
+    save_matching_scores(match_dict, score_dict, os.path.join(args.root_path, args.bridge_type, folder_name, 'aromatic' if args.aromatic else 'basic'))
+    plot_matching_scores(score_dict, os.path.join(args.root_path, args.bridge_type, folder_name, 'aromatic' if args.aromatic else 'basic'))
