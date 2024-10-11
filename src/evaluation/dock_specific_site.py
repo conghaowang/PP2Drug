@@ -7,7 +7,7 @@ import re
 import subprocess
 from utils_eval import build_pdb_dict
 
-def molecule_docking(res_path, gen_files, ligand, pdb_rev_dict, root, aromatic=True, gpu=0):
+def molecule_docking(res_path, gen_files, ligand, pdb_rev_dict, root, bridge_type, aromatic=True, optimization=True, gpu=0):
     ligand_name = ligand + '.sdf'
     pattern = r"(\w+_[A-Z]_rec)"
     match = re.search(pattern, ligand_name)
@@ -22,8 +22,10 @@ def molecule_docking(res_path, gen_files, ligand, pdb_rev_dict, root, aromatic=T
 
     log_folder = 'logs_aromatic' if aromatic else 'logs'
     out_folder = 'output_aromatic' if aromatic else 'output'
-    log_path = os.path.join(root, ligand, log_folder)
-    out_path = os.path.join(root, ligand, out_folder)
+    log_path = os.path.join(root, bridge_type, ligand, log_folder)
+    out_path = os.path.join(root, bridge_type, ligand, out_folder)
+    log_path += '_optimized' if optimization else ''
+    out_path += '_optimized' if optimization else ''
     os.makedirs(log_path, exist_ok=True)
     os.makedirs(out_path, exist_ok=True)
 
@@ -48,23 +50,23 @@ def molecule_docking(res_path, gen_files, ligand, pdb_rev_dict, root, aromatic=T
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    # parser.add_argument('--bridge', '-b', type=str, default='vp', help='Type of bridge to use')
+    parser.add_argument('--bridge_type', '-bt', type=str, default='vp', help='Type of bridge to use')
     parser.add_argument('--aromatic', '-a', action='store_true', help='Use aromatic atoms')
     parser.add_argument('--root', '-r', type=str, default='structure_based', help='Path of lightning logs')
     parser.add_argument('--gpu', '-g', type=str, default=0, help='GPU to use for docking')
     parser.add_argument('--ligand', '-l', type=str, required=True, help='Ligand file to generate from')
-    # parser.add_argument('--no_optimization', '-no_opt', action='store_true', help='Do not optimize the ligand before docking')
+    parser.add_argument('--no_optimization', '-no_opt', action='store_false', help='Do not optimize the ligand before docking')
     args = parser.parse_args()
     # bridge_type = args.bridge
 
     # res_path = '../../generation_results/' + bridge_type
     folder_name = 'aromatic' if args.aromatic else 'basic'
-    # if not args.no_optimization:
-    #     folder_name += '_optimized'
-    res_path = os.path.join(args.root, args.ligand, folder_name)
+    if args.no_optimization:
+        folder_name += '_optimized'
+    res_path = os.path.join(args.root, args.bridge_type, args.ligand, folder_name)
     raw_data_path = '../../data/cleaned_crossdocked_data/raw'
 
     gen_files = os.listdir(res_path)
     pdb_dict, pdb_rev_dict = build_pdb_dict(raw_data_path)
 
-    molecule_docking(res_path, gen_files, args.ligand, pdb_rev_dict, root=args.root, aromatic=args.aromatic, gpu=args.gpu)
+    molecule_docking(res_path, gen_files, args.ligand, pdb_rev_dict, root=args.root, bridge_type=args.bridge_type, aromatic=args.aromatic, optimization=args.no_optimization, gpu=args.gpu)
