@@ -11,6 +11,7 @@ import random
 import pickle
 from tqdm import tqdm
 from collections import defaultdict
+import argparse
 import sys
 sys.path.append('../')
 from data_processing.ligand import Ligand
@@ -91,10 +92,11 @@ class PharmacophoreData(Data):
 
 
 class PharmacophoreDataset(InMemoryDataset):
-    def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None, aromatic=False):
+    def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None, aromatic=False, filtering=True):
         self.root = root
         self._split = split
         self._max_N = 86
+        self.filtering = filtering
         self.aromatic = aromatic
         super(PharmacophoreDataset, self).__init__(root, transform, pre_transform, pre_filter)
         self.load(self.processed_paths[0])
@@ -160,6 +162,7 @@ class PharmacophoreDataset(InMemoryDataset):
         return max_N
 
     def save_pp_info(self, pp_info, split='all'):
+        pp_info = dict(pp_info)
         if split == 'train':
             filename = 'train_pp_info.pkl'
         elif split == 'valid':
@@ -170,8 +173,8 @@ class PharmacophoreDataset(InMemoryDataset):
             filename = 'pp_info.pkl'
         else:
             raise ValueError('split must be "train" or "test" or "all"')
-        os.makedirs(os.path.join(self.root, 'metadata'), exist_ok=True)
-        with open(os.path.join(self.root, 'metadata', filename), 'wb') as f:
+        os.makedirs(os.path.join(self.root, 'metadata_HDBSCAN_non_filtered'), exist_ok=True)
+        with open(os.path.join(self.root, 'metadata_HDBSCAN_non_filtered', filename), 'wb') as f:
             pickle.dump(pp_info, f)
 
     def process(self):
@@ -194,7 +197,7 @@ class PharmacophoreDataset(InMemoryDataset):
             #     print(e)
             #     continue
             try:
-                ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None)
+                ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None, filtering=self.filtering)
             except Exception as e:
                 print(raw_path, 'Ligand init failed')
                 print(e)
@@ -360,6 +363,7 @@ class PharmacophoreDataset(InMemoryDataset):
             return {0: [non_pp_atom_pos_dict[0]['id']]}, non_pp_atom_positions
 
         clustering_model = HDBSCAN(min_cluster_size=2)
+        # clustering_model = DBSCAN(eps=1.6, min_samples=1)
         clustering = clustering_model.fit(non_pp_atom_positions)
         non_pp_atom_labels = clustering.labels_
         max_label = np.max(non_pp_atom_labels)
@@ -444,11 +448,12 @@ class PharmacophoreDataset(InMemoryDataset):
     
 
 class CombinedGraphDataset(PharmacophoreDataset):
-    def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None):
+    def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None, filtering=True):
         self.root = root
         self._split = split
         self._max_N = 86 * 2
-        super(CombinedGraphDataset, self).__init__(root, split, transform, pre_transform, pre_filter)
+        self.filtering = filtering
+        super(CombinedGraphDataset, self).__init__(root, split, transform, pre_transform, pre_filter, filtering=filtering)
         self.load(self.processed_paths[0])
 
     @property
@@ -476,7 +481,7 @@ class CombinedGraphDataset(PharmacophoreDataset):
             rdmol = Chem.MolFromMolFile(raw_path, sanitize=False)
             pbmol = next(pybel.readfile("sdf", raw_path))
             try:
-                ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None)
+                ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None, filtering=self.filtering)
             except Exception as e:
                 print(raw_path, 'Ligand init failed')
                 print(e)
@@ -543,13 +548,19 @@ class CombinedGraphDataset(PharmacophoreDataset):
 
 
 class CombinedSparseGraphDataset(PharmacophoreDataset):
-    def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None, aromatic=False):
+    def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None, aromatic=False, filtering=True):
         self.root = root
         self._split = split
         self.aromatic = aromatic
         # self._max_N = 86 * 2
-        super(CombinedSparseGraphDataset, self).__init__(root, split, transform, pre_transform, pre_filter, aromatic=aromatic)
+        self.filtering = filtering
+        super(CombinedSparseGraphDataset, self).__init__(root, split, transform, pre_transform, pre_filter, aromatic=aromatic, filtering=filtering)
         self.load(self.processed_paths[0])
+
+    @property
+    def processed_dir(self):
+        print('use processed_HDBSCAN_non_filtered')
+        return os.path.join(self.root, 'processed_HDBSCAN_non_filtered')
 
     @property
     def processed_file_names(self):
@@ -587,7 +598,7 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
             # rdmol = Chem.AddHs(rdmol)
             try:
                 rdmol = Chem.AddHs(rdmol)
-                ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None)
+                ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None, filtering=self.filtering)
                 rdmol = ligand.rdmol_noH
             except Exception as e:
                 print(f'Ligand {raw_path} init failed')
@@ -673,11 +684,12 @@ class CombinedSparseGraphDataset(PharmacophoreDataset):
     
 
 class CombinedUnconditionalDataset(CombinedSparseGraphDataset):
-    def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None, aromatic=False):
+    def __init__(self, root, split='train', transform=None, pre_transform=None, pre_filter=None, aromatic=False, filtering=True):
         self.root = root
         self._split = split
         self.aromatic = aromatic
-        super(CombinedUnconditionalDataset, self).__init__(root, split, transform, pre_transform, pre_filter, aromatic=aromatic)
+        self.filtering = filtering
+        super(CombinedUnconditionalDataset, self).__init__(root, split, transform, pre_transform, pre_filter, aromatic=aromatic, filtering=filtering)
         self.load(self.processed_paths[0])
 
     @property
@@ -717,7 +729,7 @@ class CombinedUnconditionalDataset(CombinedSparseGraphDataset):
             # rdmol = Chem.AddHs(rdmol)
             try:
                 rdmol = Chem.AddHs(rdmol)
-                ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None)
+                ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None, filtering=self.filtering)
                 rdmol = ligand.rdmol_noH
             except Exception as e:
                 print(f'Ligand {raw_path} init failed')
@@ -771,12 +783,17 @@ class CombinedUnconditionalDataset(CombinedSparseGraphDataset):
         self.save(data_list, self.processed_paths[0])
 
 
-def load_dataset(module, root, split, aromatic=False):
-    dataset = module(root=root, split=split, aromatic=aromatic)
+def load_dataset(module, root, split, aromatic=False, filtering=True):
+    dataset = module(root=root, split=split, aromatic=aromatic, filtering=filtering)
     return dataset
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--aromatic', '-a', action='store_true', help='whether to include aromatic atoms in the dataset')
+    parser.add_argument('--filtering', '-f', action='store_true', help='whether to select pharmacophores randomly')
+    args = parser.parse_args()
+
     # train_dataset = PharmacophoreDataset(root='../../data/cleaned_crossdocked_data', split='train')
     # valid_dataset = PharmacophoreDataset(root='../../data/cleaned_crossdocked_data', split='valid')
     # test_dataset = PharmacophoreDataset(root='../../data/cleaned_crossdocked_data', split='test')
@@ -785,14 +802,14 @@ if __name__ == '__main__':
     # valid_dataset = CombinedGraphDataset(root='../../data/cleaned_crossdocked_data', split='valid')
     # test_dataset = CombinedGraphDataset(root='../../data/cleaned_crossdocked_data', split='test')
 
-    aromatic = sys.argv[1] == 'aromatic'
+    aromatic = args.aromatic
     print(f'aromatic: {aromatic}')
 
-    module = CombinedUnconditionalDataset # CombinedSparseGraphDataset # CombinedGraphDataset # PharmacophoreDataset
+    module = CombinedSparseGraphDataset # CombinedUnconditionalDataset # CombinedSparseGraphDataset # CombinedGraphDataset # PharmacophoreDataset
     root = '../../data/cleaned_crossdocked_data'
-    train_dataset = load_dataset(module, root, split='train', aromatic=aromatic)
-    valid_dataset = load_dataset(module, root, split='valid', aromatic=aromatic)
-    test_dataset = load_dataset(module, root, split='test', aromatic=aromatic)
+    train_dataset = load_dataset(module, root, split='train', aromatic=aromatic, filtering=args.filtering)
+    valid_dataset = load_dataset(module, root, split='valid', aromatic=aromatic, filtering=args.filtering)
+    test_dataset = load_dataset(module, root, split='test', aromatic=aromatic, filtering=args.filtering)
 
     # to test on a few samples
     # root = '../../data/small_dataset'
