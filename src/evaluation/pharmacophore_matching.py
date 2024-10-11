@@ -21,8 +21,8 @@ from tqdm import tqdm
 
 from data_processing.ligand import Ligand
 from data_processing.utils import sample_probability, PP_TYPE_MAPPING
-from script_utils import load_qm9_data
-from utils_eval import extract_pp, pp_match, save_matching_scores, plot_matching_scores
+from script_utils import load_qm9_data, load_dataset
+from utils_eval import extract_pp, extract_all_pp, pp_match, save_matching_scores, plot_matching_scores
 
 
 def load_generated_mols(generated_path):
@@ -46,11 +46,11 @@ def compute_matching_scores(generated_path, pp_info, threshold=1.5):
         pbmol = next(pybel.readfile("sdf", mol_path))
         try:
             rdmol = Chem.AddHs(rdmol)
-            ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None, filtering=False)
+            ligand = Ligand(pbmol, rdmol, atom_positions=None, conformer_axis=None, filtering=False, preprocess=False)
         except:
             print('ligand init failed')
             continue
-        pp_atom_indices, pp_positions, pp_types, pp_index = extract_pp(ligand)
+        pp_atom_indices, pp_positions, pp_types, pp_index = extract_all_pp(ligand)
         
         ref_pp_info = pp_info[smi]
         if not all(k in list(ref_pp_info.keys()) for k in ['pp_types', 'pp_positions']):
@@ -68,10 +68,25 @@ def compute_matching_scores(generated_path, pp_info, threshold=1.5):
     return match_dict, score_dict
 
 
+def center2zero(pp_info, dataset):
+    for data in tqdm(dataset):
+        Gt_mask = data['Gt_mask']
+        target_pos = data['target_pos']
+        lg_name = data['ligand_name']
+        GT_mask = ~Gt_mask
+        center = torch.mean(target_pos[GT_mask], dim=0)
+        assert center.size(-1) == 3
+        # print(lg_name)
+        pp_info[lg_name]['pp_positions'] = [pos - center for pos in pp_info[lg_name]['pp_positions']]
+
+    return pp_info
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--path', '-p', type=str, default='../lightning_logs/vp_bridge_egnn_QM9Dataset_2024-05-22_19_48_30.573332/reconstructed_mols', help='Path to the generated molecules')
     parser.add_argument('--dataset', '-d', type=str, default='cd', help='Dataset used for generation: qm9 or cd')
+    parser.add_argument('--aromatic', '-a', action='store_true', help='Whether the data is aromatic')
     args = parser.parse_args()
 
     # if args.path.endswith('aromatic_mode'):
@@ -83,14 +98,22 @@ if __name__ == '__main__':
     # print(f'Loaded {len(mols)} generated molecules')
 
     if args.dataset == 'qm9':
+        test_dataset = load_dataset('QM9Dataset', '../../data/qm9', split='test', aromatic=args.aromatic)
         with open('../../data/qm9/metadata/pp_info.pkl', 'rb') as f:
             pp_info = pickle.load(f)
     elif args.dataset == 'cd':
-        with open('../../data/cleaned_crossdocked_data/metadata/test_pp_info.pkl', 'rb') as f:
+        test_dataset = load_dataset('CombinedSparseGraphDataset', '../../data/cleaned_crossdocked_data', split='test', aromatic=args.aromatic)
+        if 'ligand_based' in args.path:
+            pp_info_file = '../../data/cleaned_crossdocked_data/metadata_HDBSCAN_non_filtered/test_pp_info.pkl'
+        else:
+            pp_info_file = '../../data/cleaned_crossdocked_data/metadata/test_pp_info.pkl'
+        with open(pp_info_file, 'rb') as f:
             pp_info = pickle.load(f)
     else:
         raise ValueError('Invalid dataset')
     # pp_info = {k:v for k, v in pp_info.items() if k in gen_map.keys()}
+
+    pp_info = center2zero(pp_info, test_dataset)
 
     match_dict, score_dict = compute_matching_scores(args.path, pp_info)
     save_matching_scores(match_dict, score_dict, args.path)
