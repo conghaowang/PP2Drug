@@ -27,6 +27,7 @@ class Ligand():
         atom_positions: Optional[Union[List[NDArray[np.float32]], NDArray[np.float32]]] = None,
         conformer_axis: Optional[int] = None,
         filtering: bool = True,
+        preprocess: bool = True,
     ):
         """Ligand Object
 
@@ -80,8 +81,8 @@ class Ligand():
         self.pharmacophore_list: List[Tuple[str, PharmacophoreNode]] = []
         for typ, node_list in self.pharmacophore_nodes.items():
             self.pharmacophore_list.extend((typ, node) for node in node_list)
-        if filtering:
-            self.filter_pharmacophore()
+        if preprocess:
+            self.preprocess(filtering)
 
         self.graph = LigandGraph(self)
 
@@ -131,57 +132,68 @@ class Ligand():
 
         return non_overlapping_pp
     
-    def filter_pharmacophore(self):
+    def preprocess(self, filtering=True):
+        # first remove overlapping pharmacophores
         all_pp = []
         for i, (pp_type, pp_node) in enumerate(self.pharmacophore_list):
             atom_indices = tuple([pp_node.atom_indices]) if type(pp_node.atom_indices)==int else tuple(sorted(pp_node.atom_indices))
         #     print(pp_type, atom_indices)
             all_pp.append([pp_type, atom_indices, i])
         all_pp = self.remove_overlapping_pp(all_pp)
-        random.shuffle(all_pp)
-        all_pp.sort(key=lambda x: len(x[1]), reverse=True)
-        num = [3, 4, 5, 6, 7]
-        num_p = [0.086, 0.0864, 0.389, 0.495, 0.0273]  # P(Number of Pharmacophore points)
-        num_ = sample_probability(num, num_p, 1)
 
-        type_list = []
-        size_ = []
+        # if filtering, we randomly select a number of pharmacophores
+        if filtering:
+            random.shuffle(all_pp)
+            all_pp.sort(key=lambda x: len(x[1]), reverse=True)
+            num = [3, 4, 5, 6, 7]
+            num_p = [0.086, 0.0864, 0.389, 0.495, 0.0273]  # P(Number of Pharmacophore points)
+            num_ = sample_probability(num, num_p, 1)
 
-        ## The randomly generated clusters are obtained,
-        # and the next step is to perform a preliminary merging of these randomly generated clusters with identical elements
-        if len(all_pp) >= int(num_[0]):
-            mol_phco = all_pp[:int(num_[0])]
+            type_list = []
+            size_ = []
+
+            ## The randomly generated clusters are obtained,
+            # and the next step is to perform a preliminary merging of these randomly generated clusters with identical elements
+            if len(all_pp) >= int(num_[0]):
+                mol_phco = all_pp[:int(num_[0])]
+            else:
+                mol_phco = all_pp
+
+            for pharmocophore_all_i in range(len(mol_phco)):
+                for pharmocophore_all_j in range(len(mol_phco)):
+                    if mol_phco[pharmocophore_all_i][1] == mol_phco[pharmocophore_all_j][1] \
+                            and mol_phco[pharmocophore_all_i][0] != mol_phco[pharmocophore_all_j][0]:
+                        index_ = [min(mol_phco[pharmocophore_all_i][0], mol_phco[pharmocophore_all_j][0]),
+                                max(mol_phco[pharmocophore_all_i][0], mol_phco[pharmocophore_all_j][0])]
+                        mol_phco[pharmocophore_all_j] = [index_, mol_phco[pharmocophore_all_i][1], mol_phco[pharmocophore_all_i][2]]
+                        mol_phco[pharmocophore_all_i] = [index_, mol_phco[pharmocophore_all_i][1], mol_phco[pharmocophore_all_i][2]]
+                    else:
+                        index_ = mol_phco[pharmocophore_all_i][0]
+
+            unique_index_filter = []
+            unique_index = []
+            for mol_phco_candidate_single in mol_phco:
+                if mol_phco_candidate_single not in unique_index:
+                    if type(mol_phco[0]) == list:
+                        unique_index.append(mol_phco_candidate_single)
+                    else:
+                        unique_index.append([[mol_phco_candidate_single[0]], mol_phco_candidate_single[1], mol_phco[pharmocophore_all_i][2]])
+            for unique_index_single in unique_index:
+                if unique_index_single not in unique_index_filter:
+                    unique_index_filter.append(unique_index_single)
+
+            new_pp_list = []
+            for item in unique_index_filter:
+                idx = item[2]
+                new_pp_list.append(self.pharmacophore_list[idx])
+            self.pharmacophore_list = new_pp_list
+
         else:
-            mol_phco = all_pp
-
-        for pharmocophore_all_i in range(len(mol_phco)):
-            for pharmocophore_all_j in range(len(mol_phco)):
-                if mol_phco[pharmocophore_all_i][1] == mol_phco[pharmocophore_all_j][1] \
-                        and mol_phco[pharmocophore_all_i][0] != mol_phco[pharmocophore_all_j][0]:
-                    index_ = [min(mol_phco[pharmocophore_all_i][0], mol_phco[pharmocophore_all_j][0]),
-                            max(mol_phco[pharmocophore_all_i][0], mol_phco[pharmocophore_all_j][0])]
-                    mol_phco[pharmocophore_all_j] = [index_, mol_phco[pharmocophore_all_i][1], mol_phco[pharmocophore_all_i][2]]
-                    mol_phco[pharmocophore_all_i] = [index_, mol_phco[pharmocophore_all_i][1], mol_phco[pharmocophore_all_i][2]]
-                else:
-                    index_ = mol_phco[pharmocophore_all_i][0]
-
-        unique_index_filter = []
-        unique_index = []
-        for mol_phco_candidate_single in mol_phco:
-            if mol_phco_candidate_single not in unique_index:
-                if type(mol_phco[0]) == list:
-                    unique_index.append(mol_phco_candidate_single)
-                else:
-                    unique_index.append([[mol_phco_candidate_single[0]], mol_phco_candidate_single[1], mol_phco[pharmocophore_all_i][2]])
-        for unique_index_single in unique_index:
-            if unique_index_single not in unique_index_filter:
-                unique_index_filter.append(unique_index_single)
-
-        new_pp_list = []
-        for item in unique_index_filter:
-            idx = item[2]
-            new_pp_list.append(self.pharmacophore_list[idx])
-        self.pharmacophore_list = new_pp_list
+            new_pp_list = []
+            for item in all_pp:
+                idx = item[2]
+                new_pp_list.append(self.pharmacophore_list[idx])
+            self.pharmacophore_list = new_pp_list
         # return unique_index_filter
 
 
