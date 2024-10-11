@@ -80,10 +80,10 @@ def sample(config_file, ckpt_path, save_path, steps=40, device='cuda:0', remove_
     os.makedirs(save_path, exist_ok=True)
     if not basic_mode:
         rec_mol_path = os.path.join(save_path, 'reconstructed_mols_aromatic_mode_optimized' if optimization else 'reconstructed_mols_aromatic_mode')
-        gen_res_file = os.path.join(save_path, 'generation_res_aromatic_mode.pkl')
+        gen_res_file = os.path.join(save_path, 'generation_res_aromatic_mode_optimized.pkl' if optimization else 'generation_res_aromatic_mode.pkl')
     else:
         rec_mol_path = os.path.join(save_path, 'reconstructed_mols_optimized' if optimization else 'reconstructed_mols')
-        gen_res_file = os.path.join(save_path, 'generation_res.pkl')
+        gen_res_file = os.path.join(save_path, 'generation_res_optimized.pkl' if optimization else 'generation_res.pkl')
     os.makedirs(rec_mol_path, exist_ok=True)
     sampler = PPBridgeSampler(config, ckpt_path, device)
 
@@ -98,7 +98,7 @@ def sample(config_file, ckpt_path, save_path, steps=40, device='cuda:0', remove_
 
     print(f'Loading data from {test_dataset.processed_paths[0]}')
     success = 0
-    all_x, all_x_traj, all_h, all_h_traj, all_nfe = [], [], [], [], []
+    # all_x, all_x_traj, all_h, all_h_traj, all_nfe = [], [], [], [], []
     for batch in tqdm(test_loader):
         batch = batch.to(device)
         if datamodule == 'CombinedSparseGraphDataset' or datamodule == 'QM9Dataset' or datamodule == 'CombinedUnconditionalDataset':
@@ -110,21 +110,21 @@ def sample(config_file, ckpt_path, save_path, steps=40, device='cuda:0', remove_
         with torch.no_grad():
             _, _, Gt_mask, batch_info = sampler.preprocess(batch.target_pos, batch.target_x, node_mask=node_mask, Gt_mask=batch.Gt_mask, batch_info=batch.batch, device=device)  # Gt_mask and batch_info are for reconstruction
             x, x_traj, h, h_traj, nfe = sampler.sample(batch.target_pos, batch.target_x, steps, node_mask=node_mask, Gt_mask=batch.Gt_mask, batch_info=batch.batch, 
-                                                       sigma_min=config.data.feat.sigma_min, sigma_max=config.data.feat.sigma_max, churn_step_ratio=0.33, device=device)
+                                                       sigma_min=config.data.feat.sigma_min, sigma_max=config.data.feat.sigma_max, churn_step_ratio=0., device=device)
         success += reconstruct(x, h, Gt_mask, batch.batch, batch.ligand_name, rec_mol_path, datamodule, remove_H=remove_H, basic_mode=basic_mode, optimization=optimization)
-        all_x.append(x)
-        all_x_traj.append(x_traj)
-        all_h.append(h)
-        all_h_traj.append(h_traj)
-        all_nfe.append(nfe)
-    with open(gen_res_file, 'wb') as f:
-        pickle.dump({
-            'x': all_x,
-            'x_traj': all_x_traj,
-            'h': all_h,
-            'h_traj': all_h_traj,
-            'nfe': all_nfe
-        }, f)
+    #     all_x.append(x)
+    #     all_x_traj.append(x_traj)
+    #     all_h.append(h)
+    #     all_h_traj.append(h_traj)
+    #     all_nfe.append(nfe)
+    # with open(gen_res_file, 'wb') as f:
+    #     pickle.dump({
+    #         'x': all_x,
+    #         'x_traj': all_x_traj,
+    #         'h': all_h,
+    #         'h_traj': all_h_traj,
+    #         'nfe': all_nfe
+    #     }, f)
 
     print(f'Successfully reconstructed {success}/{len(test_dataset)} molecules In total')
 
@@ -136,9 +136,11 @@ if __name__ == '__main__':
     parser.add_argument('--save', '-s', type=str, default='../generation_results', help='Path to save the reconstructed molecules')
     parser.add_argument('--steps', type=int, default=200, help='Number of steps for sampling')
     parser.add_argument('--gpu', '-g', type=int, default=0, help='Which GPU to use')
-    parser.add_argument('--remove_H', '-r', action='store_true', help='Whether to remove Hydrogens in the reconstruction')
+    parser.add_argument('--remove_H', '-r', action='store_false', help='Whether to remove Hydrogens in the reconstruction')
     parser.add_argument('--basic_mode', '-b', action='store_true', help='Whether to use the basic mode for reconstruction, dont add this if you want to consider aromaticity')
+    parser.add_argument('--no_optimization', '-no_opt', action='store_false', help='Whether to optimize the generated molecules')
+    
     args = parser.parse_args()
 
     device = torch.device(f'cuda:{int(args.gpu)}' if torch.cuda.is_available() else 'cpu')
-    sample(args.config, args.ckpt, args.save, int(args.steps), device, remove_H=args.remove_H, basic_mode=args.basic_mode)
+    sample(args.config, args.ckpt, args.save, int(args.steps), device, remove_H=args.remove_H, basic_mode=args.basic_mode, optimization=args.no_optimization)
