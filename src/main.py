@@ -46,7 +46,7 @@ def main(args):
     model = PPBridge(config)
     now = str(datetime.now()).replace(" ", "_").replace(":", "_")
     lr_monitor = LearningRateMonitor(logging_interval="step")
-    early_stopping = EarlyStopping(monitor='val_loss', patience=30)    # should be the ema loss
+    early_stopping = EarlyStopping(monitor='val_loss', patience=50)    # should be the ema loss
     checkpoint_callback = ModelCheckpoint(
         save_top_k=1,
         monitor="val_loss",
