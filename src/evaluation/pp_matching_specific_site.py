@@ -1,3 +1,4 @@
+from omegaconf import OmegaConf
 from rdkit import Chem
 import numpy as np
 import pandas as pd
@@ -23,6 +24,7 @@ from data_processing.ligand import Ligand
 from data_processing.utils import sample_probability, PP_TYPE_MAPPING
 from script_utils import load_qm9_data
 from utils_eval import extract_pp, extract_all_pp, pp_match, save_matching_scores, plot_matching_scores
+from generate_specific_site import find_data
 
 
 def load_generated_mols(generated_path):
@@ -76,6 +78,7 @@ def compute_center(combined_pos, Gt_mask):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--config', '-c', type=str, default='/home2/conghao001/pharmacophore2drug/PP2Drug/src/lightning_logs/vp_bridge_egnn_CombinedSparseGraphDataset_2024-08-19_21_05_04.140916/vp_bridge_egnn.yml', help='Path to the configuration file')
     parser.add_argument('--root_path', '-r', type=str, default='structure_based/', help='Path to the generated molecules')
     parser.add_argument('--bridge_type', '-bt', type=str, default='vp', help='Type of bridge to use')
     parser.add_argument('--aromatic', '-a', action='store_true', help='Whether the data is aromatic')
@@ -86,13 +89,23 @@ if __name__ == '__main__':
     # folder_name = ligand_name[ligand_name.rfind('rec')+4:ligand_name.rfind('rec')+8]
     folder_name = ligand_name
     generated_path = os.path.join(args.root_path, args.bridge_type, folder_name, 'aromatic' if args.aromatic else 'basic')
-    test_data = torch.load(os.path.join(args.root_path, folder_name, ligand_name + '_aromatic' + '.pt' if args.aromatic else ligand_name + '.pt'))
-    center = compute_center(test_data['target_pos'], test_data['Gt_mask'])
 
-    with open(os.path.join(args.root_path, folder_name, 'pp_info.pkl'), 'rb') as f:
+    test_data = torch.load(os.path.join(args.root_path, folder_name, ligand_name + '_aromatic' + '.pt' if args.aromatic else ligand_name + '.pt'))
+    pp_info_file = os.path.join(args.root_path, folder_name, 'pp_info.pkl')
+    with open(pp_info_file, 'rb') as f:
         pp_info = pickle.load(f)
 
-    # print(pp_info['pp_positions'], center)
+    # config = OmegaConf.load(args.config)
+    # test_data = find_data(ligand_name, config)
+    # pp_info_file = '../../data/cleaned_crossdocked_data/metadata_HDBSCAN_non_filtered/test_pp_info.pkl'
+    # with open(pp_info_file, 'rb') as f:
+    #     pp_info_all = pickle.load(f)
+    # pp_info = pp_info_all[ligand_name]
+    # pp_info = {k:v[0] for k, v in pp_info.items()} 
+
+
+    center = compute_center(test_data['target_pos'], test_data['Gt_mask'])
+    print(pp_info['pp_positions'], center)
     pp_info['pp_positions'] = pp_info['pp_positions'] - center
     # print(pp_info['pp_positions'])
 
