@@ -473,7 +473,7 @@ def postprocess_rd_mol_2(rdmol):
     return rdmol
 
 
-def reconstruct_from_generated(xyz, atomic_nums, aromatic=None, basic_mode=True):
+def reconstruct_from_generated(xyz, atomic_nums, aromatic=None, basic_mode=True, covalent_factor=1.5):
     """
     will utilize data.ligand_pos, data.ligand_element, data.ligand_atom_feature_full to reconstruct mol
     """
@@ -489,7 +489,7 @@ def reconstruct_from_generated(xyz, atomic_nums, aromatic=None, basic_mode=True)
     mol, atoms = make_obmol(xyz, atomic_nums)
     fixup(atoms, mol, indicators)
 
-    connect_the_dots(mol, atoms, indicators, covalent_factor=2.0)
+    connect_the_dots(mol, atoms, indicators, covalent_factor=covalent_factor)
     fixup(atoms, mol, indicators)
 
     mol.AddPolarHydrogens()
