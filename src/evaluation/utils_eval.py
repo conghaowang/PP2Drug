@@ -161,7 +161,7 @@ def extract_selected_pp(selected_pp, num_class):
         positions = pp_node.positions.squeeze()
         index = pp_node.index
         # types = [one_hot_encoding[type] for type in pp_node.types]
-        types = pp_type_mapping[pp_node.types[-1]]  # we can't have multiple types for one pharmacophore, so we just take the first one
+        types = pp_type_mapping[pp_node.types[0]]  # we can't have multiple types for one pharmacophore, so we just take the first one
 
         atom_indice_list.append(atom_indices)
         position_list.append(positions)
@@ -207,13 +207,13 @@ def compute_target(x, pos, pp_atom_indices, pp_positions, pp_types, pp_index, ce
                 node_pp_index[i] = -1
                 for j, atom_indices in non_pp_atom_indices.items():
                     if i in atom_indices:
-                        target_pos[i] = non_pp_group_center_positions[j] + torch.randn_like(non_pp_group_center_positions[j]) * noise_std
+                        target_pos[i] = non_pp_group_center_positions[j] # + torch.randn_like(non_pp_group_center_positions[j]) * noise_std
                         break
             else:  # if the atom is in a pharmacophore, we set its target type to the pharmacophore type and target position to the pharmacophore position
                 for j, atom_indices in enumerate(pp_atom_indices):
                     if i in atom_indices:
                         target_x[i] = pp_types[j]
-                        target_pos[i] = pp_positions[j] + torch.randn_like(pp_positions[j]) * noise_std
+                        target_pos[i] = pp_positions[j] # + torch.randn_like(pp_positions[j]) * noise_std
                         node_pp_index[i] = j    # = pp_index[j]
                         break
         
