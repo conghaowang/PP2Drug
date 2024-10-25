@@ -53,6 +53,7 @@ def sample_one(ligand, config_file, ckpt_path, root_path, bridge_type, num_sampl
     rec_mol_path = os.path.join(save_path, ligand, 'basic' if basic_mode else 'aromatic')
     rec_mol_path += '_optimized' if optimization else ''
     os.makedirs(rec_mol_path, exist_ok=True)
+    gen_res_file = rec_mol_path + '.pkl'
     sampler = PPBridgeSampler(config, ckpt_path, device)
 
     # we should keep basic_mode consistent with the data. currently if the data has no aromatic information, we actually use the basic_mode no matter what the cmd argument is
@@ -61,26 +62,34 @@ def sample_one(ligand, config_file, ckpt_path, root_path, bridge_type, num_sampl
     else:
         data_path = os.path.join(root_path, ligand, ligand + '.pt')
 
-    # data = torch.load(data_path)
-    data = find_data(ligand, config)
+    data = torch.load(data_path)
+    # data = find_data(ligand, config)
     data_list = [data for _ in range(num_samples)]
     batch = Batch.from_data_list(data_list)
 
     success = 0
     batch = batch.to(device)
     node_mask = torch.ones([1, batch.x.size(0)], dtype=torch.bool, device=device)
+    all_x, all_h = [], []
     with torch.no_grad():
         _, _, Gt_mask, batch_info = sampler.preprocess(batch.target_pos, batch.target_x, node_mask=node_mask, Gt_mask=batch.Gt_mask, batch_info=batch.batch, device=device)  # Gt_mask and batch_info are for reconstruction
         x, x_traj, h, h_traj, nfe = sampler.sample(batch.target_pos, batch.target_x, steps, node_mask=node_mask, Gt_mask=batch.Gt_mask, batch_info=batch.batch, 
                                                     sigma_min=config.data.feat.sigma_min, sigma_max=config.data.feat.sigma_max, churn_step_ratio=0., device=device)
         
+    all_x += x
+    all_h += h
+    with open(gen_res_file, 'wb') as f:
+        pickle.dump({
+            'x': x.cpu(),
+            'h': h.cpu()
+        }, f)
     save_names = [f'{pdb_id}_{i}' for i in range(num_samples)]
-    success += reconstruct(x, h, Gt_mask, batch.batch, save_names, rec_mol_path, 'CombinedSparseGraphDataset', remove_H=remove_H, basic_mode=basic_mode, optimization=optimization)
+    success += reconstruct(x, h, Gt_mask, batch.batch, save_names, rec_mol_path, 'CombinedSparseGraphDataset', remove_H=remove_H, basic_mode=basic_mode, optimization=optimization, covalent_factor=2.0)
     print(f'Successfully reconstructed {success}/{num_samples} molecules In total')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--num_samples', '-n', type=int, default=1, help='Number of samples to generate')
+    parser.add_argument('--num_samples', '-n', type=int, default=10, help='Number of samples to generate')
     parser.add_argument('--ligand', '-l', type=str, required=True, help='Ligand file to generate from')
     parser.add_argument('--config', '-c', type=str, default='/home2/conghao001/pharmacophore2drug/PP2Drug/src/lightning_logs/vp_bridge_egnn_CombinedSparseGraphDataset_2024-08-19_21_05_04.140916/vp_bridge_egnn.yml', help='Path to the configuration file')
     parser.add_argument('--ckpt', '-k', type=str, default='/home2/conghao001/pharmacophore2drug/PP2Drug/src/lightning_logs/vp_bridge_egnn_CombinedSparseGraphDataset_2024-08-19_21_05_04.140916/epoch=166-val_loss=75.36.ckpt', help='Path to the checkpoint file')
