@@ -22,7 +22,7 @@ from script_utils import load_data, load_qm9_data
 
 
 @torch.no_grad()
-def reconstruct(x, h, Gt_mask, batch_info, ligand_names, mol_save_path, datamodule='QM9Dataset', softmax_h=True, remove_H=False, basic_mode=False, optimization=True):
+def reconstruct(x, h, Gt_mask, batch_info, ligand_names, mol_save_path, datamodule='QM9Dataset', softmax_h=True, remove_H=False, basic_mode=False, optimization=True, covalent_factor=1.3):
     if datamodule == 'QM9Dataset':
         index_to_atom_type_aromatic = {v: k for k, v in MAP_ATOM_TYPE_AROMATIC_TO_INDEX.items()}
     num_graphs = max(batch_info).item() + 1
@@ -33,8 +33,8 @@ def reconstruct(x, h, Gt_mask, batch_info, ligand_names, mol_save_path, datamodu
         h_i = h[index_i][Gt_mask[index_i]]
         if softmax_h:
             h_i = F.softmax(h_i, dim=-1)
-        if remove_H:
-            h_i = h_i[:, :-1]
+        # if remove_H:
+        #     h_i = h_i[:, :-1]
         h_class = torch.argmax(h_i, dim=-1)
         atom_index = h_class.detach().cpu()
         if datamodule == 'QM9Dataset':
@@ -59,7 +59,7 @@ def reconstruct(x, h, Gt_mask, batch_info, ligand_names, mol_save_path, datamodu
                 atom_aromatic = is_aromatic_from_index(atom_index)
         pos = x_i.detach().cpu().tolist()
         try:
-            mol = reconstruct_from_generated(pos, atom_type, atom_aromatic, basic_mode=basic_mode)
+            mol = reconstruct_from_generated(pos, atom_type, atom_aromatic, basic_mode=basic_mode, covalent_factor=covalent_factor)
             mol_name = ligand_names[i]
             if optimization:
                 mol = Chem.AddHs(mol, addCoords = True)
@@ -111,7 +111,7 @@ def sample(config_file, ckpt_path, save_path, steps=40, device='cuda:0', remove_
             _, _, Gt_mask, batch_info = sampler.preprocess(batch.target_pos, batch.target_x, node_mask=node_mask, Gt_mask=batch.Gt_mask, batch_info=batch.batch, device=device)  # Gt_mask and batch_info are for reconstruction
             x, x_traj, h, h_traj, nfe = sampler.sample(batch.target_pos, batch.target_x, steps, node_mask=node_mask, Gt_mask=batch.Gt_mask, batch_info=batch.batch, 
                                                        sigma_min=config.data.feat.sigma_min, sigma_max=config.data.feat.sigma_max, churn_step_ratio=0., device=device)
-        success += reconstruct(x, h, Gt_mask, batch.batch, batch.ligand_name, rec_mol_path, datamodule, remove_H=remove_H, basic_mode=basic_mode, optimization=optimization)
+        success += reconstruct(x, h, Gt_mask, batch.batch, batch.ligand_name, rec_mol_path, datamodule, remove_H=remove_H, basic_mode=basic_mode, optimization=optimization, covalent_factor=2.0)
     #     all_x.append(x)
     #     all_x_traj.append(x_traj)
     #     all_h.append(h)
