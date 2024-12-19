@@ -53,7 +53,7 @@ if __name__ == "__main__":
     parser.add_argument('--bridge_type', '-bt', type=str, default='vp', help='Type of bridge to use')
     parser.add_argument('--aromatic', '-a', action='store_true', help='Use aromatic atoms')
     parser.add_argument('--root', '-r', type=str, default='structure_based', help='Path of lightning logs')
-    parser.add_argument('--gpu', '-g', type=str, default=0, help='GPU to use for docking')
+    parser.add_argument('--gpu', '-g', type=str, default='0', help='GPU to use for docking')
     parser.add_argument('--ligand', '-l', type=str, required=True, help='Ligand file to generate from')
     parser.add_argument('--no_optimization', '-no_opt', action='store_false', help='Do not optimize the ligand before docking')
     args = parser.parse_args()
