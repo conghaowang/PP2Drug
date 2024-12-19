@@ -333,3 +333,49 @@ def plot_matching_scores(score_dict, save_path):
     ax.set_xlabel('Matching Score')
     ax.set_ylabel('Frequency')
     plt.savefig(save_path + '_score_dist.png', dpi=300)
+
+
+def get_minimized_affinity(filename, mode='ref'):
+    if mode == 'ref':
+        with open(filename, 'r') as file:
+            for line in file:
+                if '<minimizedAffinity>' in line:
+                    # The next line after '<minimizedAffinity>' contains the value
+                    return float(next(file))
+            
+    else:
+        with open(filename, 'r') as f:
+            lines = f.readlines()
+            lines = lines[19:28]
+#             print(len(lines))
+            n = len(lines)
+            arr = np.zeros(n)
+            cnn_arr = np.zeros(n)
+#             print(filename)
+            for i in range(n):
+                arr[i] = float(lines[i][11:17])
+                cnn_arr[i] = float(lines[i][34:42])
+#             print(arr)
+            try:
+                score = np.min(arr)
+                cnn_score = np.min(cnn_arr)
+            except:
+                score = None
+                cnn_score = None
+                print(f'{filename} failed')
+                print('its scores: ', arr)
+        return score, cnn_score
+    
+
+def get_affinity_best_pose(filename):
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+        lines = lines[19:28]
+        try:
+            score = float(lines[0][11:17])
+            cnn_score = float(lines[0][34:42])
+            # cnn_score = float(lines[0][24:30])
+        except:
+            score = None
+            cnn_score = None
+        return score, cnn_score
