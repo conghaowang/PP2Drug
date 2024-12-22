@@ -1,6 +1,6 @@
 # PP2Drug
 
-Code repository for the paper *Pharmacophore-constrained de novo drug design with diffusion bridge*. The paper is under screening on arXiv. 
+Code repository for the paper [*Pharmacophore-constrained de novo drug design with diffusion bridge*](https://www.biorxiv.org/content/10.1101/2024.12.18.629145v1). 
 
 ## Environment setup
 
